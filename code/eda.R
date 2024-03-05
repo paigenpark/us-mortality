@@ -18,6 +18,7 @@ library(ggplot2)
 library(ggfortify)
 library(geosphere) # for calculating distances between states 
 library(reshape2) # for melting data frames into long format 
+library(gganimate)
 
 ### STATE DATA ###
 # read in life tables for all 50 states 
@@ -292,7 +293,42 @@ ggplot() +
   theme_minimal() +
   labs(fill = "Shock Magnitude")
 
+### MAP ANIMATION ###
+# adjust data first 
+shock_ts_long <- rownames_to_column(as.data.frame(t(shock_ts)), var = "year")
+shock_ts_long <- pivot_longer(shock_ts_long,
+                              cols = -year,
+                              names_to = "region",
+                              values_to = "shocks")
+shock_ts_long$year <- as.integer(shock_ts_long$year)
+shock_ts_no2020 <- shock_ts_long[shock_ts_long$year != 2020, ]
 
+base_map <- ggplot() + 
+  geom_map(data=us, map=us,
+           aes(x=long, y=lat, map_id=region)) +
+  geom_map(data=shock_ts_no2020, map=us,
+           aes(fill=shocks, map_id=region, group=year)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(fill = "Shock Magnitude")
+
+map_with_animation <- base_map +
+  transition_time(year) +
+  ggtitle('Year: {frame_time}')
+
+## save as gif
+animation = animate(map_with_animation,
+                    end_pause = 50,
+                    renderer = gifski_renderer(),
+                    width = 800,
+                    height = 450,
+                    fps = 1
+                    )
+animation
+
+anim_save(
+  filename = paste(path, "animation.gif", sep="/")
+)
   
 ### PCA PLOT - NOT THAT USEFUL ###
 # changing labels on shock_ts for better looking plot : not good code, fix later 
@@ -656,17 +692,18 @@ df_19rank <- bind_rows(df_selected_2019, df_19rank_1959)
 # we can see a shift from more rural states having the highest e0 in 1959, to the states with larger pops
 # in 2019 
 
-## create visualization of this info
-df_1959 <- df_filtered%>%
+
+df_1959 <- df_filtered %>%
   filter(Year == 1959) %>%
-  arrange(desc(Life_Expectancy))
+  arrange(desc(Life_Expectancy)) %>%
+  rename(region = states)
 
 df_2019 <- df_filtered %>%
   filter(Year == 2019) %>%
   arrange(desc(Life_Expectancy))
 
-
-# Join the map and e0 data
+## DATASETS CURRENTLY NOT COMPATIBLE SO THIS CODE NOT WORKING
+# Join the map and e0 data 
 df_1959_merged = merge(us, df_1959, by = "region", all = F)
 df_2019_merged = merge(us, df_2019, by = "region", all = F)
 
