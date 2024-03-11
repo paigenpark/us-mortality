@@ -273,12 +273,12 @@ ggplot() +
           aes(x=long, y=lat, map_id=region)) +
   geom_map(data=shocks_2009, map=us,
             aes(fill=shocks, map_id=region)) +
-  scale_fill_gradient(low = "darkred", high = "white") +
+  scale_fill_viridis_c() +
   theme_minimal() +
   labs(fill = "Shock Magnitude")
 
-### MAP OF SHOCK GEOGRAPHY IN BAD HEAT WAVE YEAR (1988 HEAT WAVE) ###
-shocks_1988 <- as.data.frame(shock_ts[,"1988"])
+### MAP OF SHOCK GEOGRAPHY IN REGIONAL HEAT WAVE YEAR (1983 HEAT WAVE) ###
+shocks_1988 <- as.data.frame(shock_ts[,"1983"])
 shocks_1988 <- rownames_to_column(shocks_1988, var = "region")
 colnames(shocks_1988) <- c("region", "shocks")
 us <- map_data("state")
@@ -289,9 +289,16 @@ ggplot() +
            aes(x=long, y=lat, map_id=region)) +
   geom_map(data=shocks_1988, map=us,
            aes(fill=shocks, map_id=region)) +
-  scale_fill_gradient(low = "darkred", high = "white") +
-  theme_minimal() +
+  scale_fill_viridis_c() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title.y=element_blank(),
+        axis.title.x=element_blank(),
+        rect = element_blank()) +
   labs(fill = "Shock Magnitude")
+
+
 
 ### MAP ANIMATION ###
 # adjust data first 

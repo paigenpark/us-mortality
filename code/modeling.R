@@ -325,7 +325,27 @@ state_no_obs_bfgs = which(state_bfgs[3,]<=0.0000000001)
 state_no_obs_bfgs = colnames(state_bfgs)[state_no_obs_bfgs]
 state_no_obs_bfgs
 
+## BAR PLOT OF 0 OBS_VAR BY METHOD ##
 
+
+barchart_data <- data.frame(
+  state = full_state_names,
+  MARSS_BFGS = full_state_names %in% state_no_obs_bfgs,
+  StructTS = full_state_names %in% state_no_obs_sts
+)
+
+# Reshape data to long format
+long_data <- pivot_longer(barchart_data, cols = c(MARSS_BFGS, StructTS), names_to = "method", values_to = "has_no_obs")
+
+# Filter to keep only TRUE values
+long_data <- long_data[long_data$has_no_obs == TRUE, ]
+
+# Create a stacked bar chart
+ggplot(long_data, aes(x = method, fill = state)) +
+  geom_bar() +
+  labs(x = "Software", y = "Count of States with Estimate of Zero Transitory Shocks", fill = "State") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Adjust the x-axis labels if necessary
 
 ##### GENERATING TABLES OF DRIFT, INNOV SD, OBS SD, SAMPLING SD, & SHOCK SD #####
 library(knitr)

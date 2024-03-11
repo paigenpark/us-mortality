@@ -116,9 +116,9 @@ simu_rwd_with_obs_error <- function(N = 100, x0 = 0,
 }
 
 ## setting arbitrary values for drift, var_innov, and var_obs terms 
-d = .4 
-var_innov = 2 
-var_obs = 1
+d = .1 
+var_innov = .1
+var_obs = .1
 
 ## standard example
 y <- simu_rwd_with_obs_error(N = 1400,
@@ -133,7 +133,7 @@ rbind(out.sts, out.marss, out.bfgs)
 ## (4) create illustrative figure
 
 ## run multiple simulations with varying var_obs values
-var_obs_values = seq(0.01, 3, length.out = 100)
+var_obs_values = seq(0.01, 0.1, length.out = 100)
 results = matrix(NA, nrow = length(var_obs_values), ncol = 4)
 colnames(results) = c("True", "StructTS", "MARSS_kem", "MARSS_BFGS")
 
