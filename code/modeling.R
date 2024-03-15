@@ -612,7 +612,34 @@ aic_aicc$sts_aic <- round(aic_aicc$sts_aic, 1)
 aic_aicc$rwd_aicc <- round(aic_aicc$rwd_aicc, 1)
 aic_aicc$sts_aicc <- round(aic_aicc$sts_aicc, 1)
 
+# prep barchart
+aic = aic_aicc[,1:2]
+aic = rownames_to_column(aic, "state")
+aic$diff = aic$sts_aic - aic$rwd_aic
 
+# pure AIC value plot 
+aic_long = pivot_longer(aic, cols=c("rwd_aic", "sts_aic"), names_to="model", values_to="AIC")
+
+ggplot(aic_long, aes(x = state, y = AIC, fill = model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Adjust text angle and justification for readability
+  labs(title = "Comparison of AIC Values by State",
+       x = "State",
+       y = "AIC Value",
+       fill = "Model")
+
+# difference plot 
+ggplot(aic, aes(x = state, y = diff, fill = diff > 0)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  scale_fill_manual(values = c("TRUE" = "lightblue", "FALSE" = "darkblue"), 
+                    name = "Model Better", 
+                    labels = c("TRUE" = "RWD Better", "FALSE" = "STS Better")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "State",
+       y = "AIC Difference")
+
+# prep table
 aic_smaller_for_rwd = which(aic_aicc[ ,'rwd_aic'] < aic_aicc[ ,'sts_aic'])
 aic_smaller_for_rwd = rownames(aic_aicc)[aic_smaller_for_rwd]
 
