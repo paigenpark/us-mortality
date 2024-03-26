@@ -73,6 +73,10 @@ e0_df_long_div <- div_e0 %>%
 e0_df_long_div <- cbind(full_div_names, e0_df_long_div)
 e0_df_long_div$Year <- as.numeric(e0_df_long_div$Year)
 
+
+
+
+
 ### PLOTTING E0 TO SEE OVERALL PATTERNS AND REVERSALS ###
 ### STATES - APPENDIX? ###
 # estimate of sd based on mid point pop size 
@@ -129,6 +133,11 @@ ggplot(e0_df_long, aes(x = Year, y = Life_Expectancy)) +
     theme_minimal() +
     labs(x = "Year", y = "Life Expectancy at Birth") +
     scale_x_continuous(breaks = c(min(e0_df_long$Year), max(e0_df_long$Year)))
+
+
+
+
+
 
 ### CENSUS DIVSION REVERSALS FIGURE ###
 # Creating a lookup dataframe with State and their corresponding Census Division
@@ -238,6 +247,10 @@ gg <- gg + theme(axis.ticks = element_blank())
 gg <- gg + theme(axis.text = element_blank())
 gg
 
+
+
+
+
 ### CORRELATION PLOTS OF SHOCKS ###
 ### define shocks ### 
 e0_df = as.matrix(e0_df)
@@ -260,6 +273,10 @@ moving_average[,60:62] <- moving_average_right[,60:62]
 
 shock_ts <- moving_average - e0_df
 
+
+
+
+
 ### MAP OF SHOCK GEOGRAPHY IN BAD FLU YEAR (2009 SWINE FLU) ###
 shocks_2009 <- as.data.frame(shock_ts[,"2009"])
 shocks_2009 <- rownames_to_column(shocks_2009, var = "region")
@@ -275,6 +292,11 @@ ggplot() +
   scale_fill_gradient(low = "darkred", high = "white") +
   theme_minimal() +
   labs(fill = "Shock Magnitude")
+
+
+
+
+
 
 ### MAP OF SHOCK GEOGRAPHY IN BAD HEAT WAVE YEAR (1988 HEAT WAVE) ###
 shocks_1988 <- as.data.frame(shock_ts[,"1988"])
@@ -294,6 +316,8 @@ ggplot() +
 
 
   
+
+
 ### PCA PLOT - NOT THAT USEFUL ###
 # changing labels on shock_ts for better looking plot : not good code, fix later 
 state_abb <- c(
@@ -357,6 +381,11 @@ summary(data.pca)
 autoplot(data.pca, label = TRUE, shape = FALSE)
 #biplot(data.pca)
 
+
+
+
+
+
 ### LOADINGS PLOT - NOT THAT USEFUL ###
 loadings <- sort(data.pca$loadings[, 1], decreasing = TRUE)
 barplot(loadings, main="Loadings of the first principal component", xlab="Variables", ylab="Loadings")
@@ -365,6 +394,10 @@ loadings_df <- as.data.frame(data.pca$loadings[, 1:2])
 l_plot + 
   geom_text_repel(data = loadings_df, max.overlaps = 20,
                   aes(x = Comp.1, y = Comp.2, label = rownames(loadings_df)))
+
+
+
+
 
 ### CORRELATION PLOT WITH ALL 50 STATES - TOO CROWDED ###
 # reorder data according to factor loadings on PC1
@@ -388,6 +421,10 @@ shock_ts <- shock_ts[, new_order]
 ggcorrplot(corr_matrix, insig = "blank") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 
+
+
+
+
 ### CORRELATION PLOT WITH SRS OF STATES - DOESN'T ACTUALLY SAY MUCH ###
 plots = list()
 for (i in 1:4) {
@@ -398,6 +435,10 @@ for (i in 1:4) {
     theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 }
 grid.arrange(plots[[1]], plots[[2]], plots[[3]], plots[[4]], nrow=2, ncol=2)
+
+
+
+
 
 ### CORRELATION PLOT WITH STRATIFIED SAMPLE ###
 # correlation plots with random sample stratified by census division (2 per division)
@@ -444,6 +485,11 @@ ggcorrplot(sub_corr, insig = "blank") +
 # [1] 4 1
 # > sample(1:3, 2, replace=FALSE)
 # [1] 3 2
+
+
+
+
+
 
 
 ### CORRELATION BY DISTANCE SCATTER PLOT ###
@@ -498,6 +544,10 @@ ggplot(combined_long, aes(x = distance, y = shock_correlation)) +
   )
 
 
+
+
+
+
 ### CORRELATION PLOT WITH CENSUS DIVISIONS ###
 ### DEFINE SHOCKS ### 
 div_e0 = as.matrix(div_e0)
@@ -524,6 +574,12 @@ shock_div <- as.data.frame(t(shock_div))
 corr_matrix <- cor(shock_div)
 ggcorrplot(corr_matrix, insig = "blank", hc.order = TRUE) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+
+
+
+
+
 
 
 

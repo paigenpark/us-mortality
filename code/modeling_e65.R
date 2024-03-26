@@ -292,24 +292,23 @@ colnames(state_e0) <- c(seq(1959,2020,1))
 # create data with 2020 removed for testing impact of 2020 mortality on models 
 s_no2020 = state_e0[, -62]
 
+# create data with tenths of years of life expectancy as the units for less 0s
+state_e0_tenths = state_e0 * 10
+
 # MARSS kem
 state_kem = matrix(NA, nrow=50, ncol=3)
 state_kem = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_kem))
-  # results in 6 states that don't converge when used with "kem" method
-  # results in 8 states that don't converge when run on data excluding 2020
+
 
 # MARSS BFGS
-state_bfgs = matrix(NA, nrow=50, ncol=3)
-state_bfgs = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_bfgs))
-  # results in 6 states with near 0 observation variance 
-  # results in 6 states with 0 observation variance when 2020 is excluded
+state_bfgs_tenths = matrix(NA, nrow=50, ncol=3)
+#state_bfgs = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_bfgs))
+state_bfgs_tenths = as.data.frame(apply(state_e0_tenths, 1, rwd_with_obs_error_bfgs))
+
 
 # StructTS
 state_sts = matrix(NA, nrow=50, ncol=3)
 state_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_error))
-    # results in 13 states with 0 observation variance
-    # results in 10 states with 0 observation variance when using data excluding 2020
-    # help page for StructTS says that it's not uncommon for 0's to occur
    
 
 # get names of states with var_obs = 0 
@@ -327,19 +326,24 @@ state_no_obs_bfgs
 
 
 
+
+
+
 ##### GENERATING TABLES OF DRIFT, INNOV SD, OBS SD, SAMPLING SD, & SHOCK SD #####
 library(knitr)
 library(kableExtra)
 
-# get estimate for N to use in sampling SD approximation: I use the population estimates from the mid-point year of the time series (1989) 
+# get estimate for N to use in sampling SD approximation: 
+# I use the population estimates from the mid-point year of the time series (1989) 
 # if population growth is roughly linear during this time span that would be a reasonable thing to do
 
 # load in population data from the Census (data includes pop by state from 1985 to 1989)
 pop_89 = read.csv(paste(path, "89_pop.csv", sep = "/"), header = TRUE, row.names = 1)
 pop_89 = pop_89["Jul.89"] # filter to just year 1989
 
-samp_sd = 150/sqrt(pop_89) # create sampling standard deviation estimates using N from 89 (approximation given in Hanley 2022)
-samp_sd = subset(samp_sd, !(rownames(samp_sd) %in% c("US", "DC"))) # get rid of observations not in USMDB 
+# create sampling standard deviation estimates using N from 89 (approximation given in Hanley 2022)
+samp_sd_hanley = 150/sqrt(pop_89) 
+samp_sd_hanley = subset(samp_sd_hanley, !(rownames(samp_sd_hanley) %in% c("US", "DC"))) # get rid of observations not in USMDB 
 
 # construct StructTS table 
 state_sts_table = t(state_sts)
@@ -384,20 +388,21 @@ state_bfgs_table = state_bfgs_table %>%
   mutate(shock_sd = var_obs - Jul.89^2) %>% # get shock sd through additive property of var
   mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), shock_sd = sqrt(shock_sd)) # changing all of the variances to SDs
 
-colnames(state_bfgs_table) = c("drift", "process_SD", "observation_SD", "sampling_SD", "shock_SD")
-state_bfgs_table$shock_SD <- ifelse(state_bfgs_table$shock_SD < 0, NA, state_bfgs_table$shock_SD)
+colnames(state_bfgs_table) = c("drift", "process SD", "observation SD", "sampling SD", "shock SD")
+# state_bfgs_table$shock_SD <- ifelse(state_bfgs_table$shock_SD < 0, NA, state_bfgs_table$shock_SD)
 
 # round 
 library(scales)
-state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.00000001) else x))
+state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.001) else x))
 
 # convert cells with 0 to red 
 state_bfgs_table_red = state_bfgs_table_round
 format_cell = function(cell_value) {
   if (is.na(cell_value)) {
-    return(cell_spec("NA", "latex", background = "gray"))
+    return(cell_spec("$\sim$ 0", "latex"))
   } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", "#FF9999", "white")) # changing this code to capture near 0 results in red 
+    cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", 
+                                                       "#FF9999", "white")) # changing this code to capture near 0 results in red 
   }
 }
 
@@ -408,8 +413,15 @@ state_bfgs_table_red[] = as.data.frame(sapply(state_bfgs_table_round, function(c
 rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
 
 # get latex code for MARSS BFGS
-kable(state_bfgs_table_red, caption = "MARSS BFGS Results", format="latex", escape = FALSE) %>%
+kable(state_bfgs_table_red, 
+      caption = "Structural Time Series Model Results for Life Expectancy at Age 65", 
+      format="latex", escape = FALSE) %>%
   kable_styling()
+
+# checking obs var and shock var correlation
+state_bfgs_table_0 = state_bfgs_table
+state_bfgs_table_0$`shock SD` = state_bfgs_table$`shock SD`
+plot(state_bfgs_table$`observation SD`, state_bfgs_table$`shock SD`)
 
 
 # construct MARSS kem table
@@ -556,6 +568,26 @@ rownames(state_kem_table_red) <- rownames(state_kem_table)
 # get latex code for MARSS kem
 kable(state_kem_table_red, caption = "MARSS KEM Results", format="latex", escape = FALSE) %>%
   kable_styling()
+
+
+
+
+#### TABLES WITH BOOTSTRAP SAMPLING SD ####
+# load in sampling standard deviation estimates (and CIs) created using bootstrap approach
+# code for creating of these estimates can be found at in code file: 
+# bootstrap_variance_of_variance_of_e0.RMD
+boot_results = read.csv(paste(path, "boot_results.csv", sep = "/"), header = TRUE, row.names = 1)
+
+# the e0.var column in boot_results should replace the samp_var column in the prior table
+# the sd column in boot_results can be used to calculate confidence intervals for the samp_var column
+
+# to get sd/ci for first three columns of the table we're constructing, we need to get these from the 
+# MARSS output if possible 
+
+# to get the sd/ci for the shock_sd column, we need to subtract cis from obs_var and samp_var (I think
+# this will work anyway)
+
+
 
 
 ### COMPARING MODEL SELECTION CRITERIA BETWEEN RWD AND STS ###
