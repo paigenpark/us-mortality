@@ -26,7 +26,7 @@ rwd <- function(y){
 }
 
 # structural time series (STS) specification = RWD + observation error
-rwd_with_obs_error <- function(y, ..., maxit = 4000){
+rwd_with_obs_error <- function(y, ..., maxit = 5000){
   sts = StructTS(x = y, type = "trend", fixed = c(NA, 0, NA), ...,
                  optim.control = list(maxit = maxit))
   d.hat = sts$model$a[2]
@@ -343,7 +343,7 @@ long_data <- long_data[long_data$has_no_obs == TRUE, ]
 # Create a stacked bar chart
 ggplot(long_data, aes(x = method, fill = state)) +
   geom_bar() +
-  labs(x = "Software", y = "Count of States with Estimate of Zero Transitory Shocks", fill = "State") +
+  labs(y = "Count of States with Estimate of Zero for Observation Variance", fill = "State", x=NULL) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Adjust the x-axis labels if necessary
 
@@ -576,6 +576,124 @@ rownames(state_kem_table_red) <- rownames(state_kem_table)
 # get latex code for MARSS kem
 kable(state_kem_table_red, caption = "MARSS KEM Results", format="latex", escape = FALSE) %>%
   kable_styling()
+
+
+
+
+
+
+#### TABLES WITH BOOTSTRAP SAMPLING SD AND CONFIDENCE INTERVALS ####
+# load in sampling standard deviation estimates (and CIs) created using bootstrap approach
+# code for creating of these estimates can be found at in code file: 
+# bootstrap_variance_of_variance_of_e0.RMD
+boot_results = read.csv(paste(path, "boot_results.csv", sep = "/"), header = TRUE, row.names = 1)
+
+# the e0.var column in boot_results should replace the samp_var column in the prior table
+# the sd column in boot_results can be used to calculate confidence intervals for the samp_var column
+
+# to get sd/ci for first three columns of the table we're constructing, we need to get these from the 
+# MARSS output 
+set.seed(10)
+marss_out <- apply(state_e0, 1, rwd_obs_error_bfgs_out)
+bfgs_with_cis <- lapply(marss_out, MARSSparamCIs)
+obs_var_new <- unlist(lapply(marss_out, function(x) coef(x)$R[1,1]))
+
+# to get the sd/ci for the shock_sd column, we need to subtract cis from obs_var and samp_var (I think
+# this will work anyway)
+# to produce a conservative interval for shock variance, we need to subtract the lower bound obs var interval 
+# from the upper bound samp var interval and vice versa 
+# this gives the widest and most conservative interval of the shock variance 
+# R param = observation variance 
+obs_lb <- unlist(lapply(bfgs_with_cis, function(x) x[[26]][['R']]))
+obs_ub <- unlist(lapply(bfgs_with_cis, function(x) x[[25]][['R']]))
+
+samp_lb <- boot_results$e0.var - 2 * boot_results$se_of_var_e0
+samp_ub <- boot_results$e0.var + 2 * boot_results$se_of_var_e0
+
+shock_lb <- obs_lb - samp_ub
+shock_ub <- obs_ub - samp_lb
+shock_mean <- obs_var_new - boot_results$e0.var
+
+library(ggplot2)
+
+# prepare data
+data <- data.frame(
+  State = factor(names(shock_lb)),
+  Mean = shock_mean,
+  Lower = shock_lb,
+  Upper = shock_ub
+)
+
+data$State <- reorder(data$State, data$Mean)
+
+# Dot chart with confidence intervals
+ggplot(data, aes(x = State, y = Mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  coord_flip() +
+  xlab("") +
+  ylab("Shock Variance") +
+  theme_minimal()
+
+
+# construct MARSS BFGS table with bootstrap variance
+state_bfgs_table = t(state_bfgs)
+samp_var = boot_results$e0.var
+state_bfgs_table = as.data.frame(cbind(state_bfgs_table, samp_var))
+state_bfgs_table = state_bfgs_table %>%
+  mutate(shock_sd = var_obs - samp_var) %>% # get shock sd through additive property of var
+  mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), samp_var = sqrt(samp_var), shock_sd = sqrt(shock_sd)) # changing all of the variances to SDs
+
+colnames(state_bfgs_table) = c("drift", "process SD", "observation SD", "sampling SD", "shock SD")
+# state_bfgs_table$shock_SD <- ifelse(state_bfgs_table$shock_SD < 0, NA, state_bfgs_table$shock_SD)
+
+# round 
+library(scales)
+library(kableExtra)
+state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.001) else x))
+
+# convert cells with 0 to red 
+state_bfgs_table_red = state_bfgs_table_round
+format_cell = function(cell_value) {
+  if (is.na(cell_value)) {
+    return(cell_spec("sim 0", "latex"))
+  } else {
+    cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", 
+                                                       "#FF9999", "white")) # changing this code to capture near 0 results in red 
+  }
+}
+
+state_bfgs_table_red[] = as.data.frame(sapply(state_bfgs_table_round, function(col) {
+  sapply(col, format_cell) 
+}))
+
+rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
+
+# get latex code for MARSS BFGS
+kable(state_bfgs_table_red, 
+      caption = "Structural Time Series Model Results for Life Expectancy at Age 65", 
+      format="latex", escape = FALSE) %>%
+  kable_styling()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ### COMPARING MODEL SELECTION CRITERIA BETWEEN RWD AND STS ###

@@ -1,0 +1,228 @@
+---
+title: "Bootstrap of variance in variance of e65"
+output: html_notebook
+---
+
+Here I illustrate the bootstrap approach.
+
+Note: all values are made up and need replacing with real ones
+
+Note: my formula for e0 could also be improved.
+```{r}
+library(tidyverse) 
+library(whereami)
+```
+
+Set up path
+```{r}
+# path
+script_dir <- whereami()
+path <- file.path(script_dir, "../../data") # assumes this R script is in a code folder, 
+                                            # this goes up two levels from current script location  
+                                            # into the main directory, then back down into data folder
+path = normalizePath(path)
+```
+
+Load in data
+```{r}
+states = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", 
+           "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", 
+           "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", 
+           "WV", "WI", "WY")
+state_data = list()
+for (i in 1:length(states)){
+  file = paste(states[i], "bltper_1x1.csv", sep = "_")
+  state_data[[i]] = read.csv(paste(path, file, sep = "/"))
+}
+```
+
+Mx values
+```{r}
+Mx = lapply(state_data, function(x) {
+  filtered_df <- x[x$Year == 1989, ]
+  # filtered_df <- filtered_df[filtered_df$Age >= 65, ]
+  
+  return(filtered_df$mx)
+})
+
+state_names <- sapply(state_data, function(df) as.character(df$PopName[1]))
+
+names(Mx) <- state_names
+```
+
+```{r}
+bad_e0_fun <- function(Mx) { 
+  Hx <- cumsum(Mx)
+  lx <- c(1, exp(-Hx))
+  e0 = sum(lx)
+  return(e0)
+}
+```
+
+Nx (pop size)
+```{r}
+pop_89 = read.csv(paste(path, "89_pop.csv", sep = "/"), header = TRUE, row.names = 1)
+pop_89 = pop_89["Jul.89"] # filter to just year 1989
+N = subset(pop_89, !(rownames(pop_89) %in% c("US", "DC")))
+
+## distribute by age (assuming stationarity probably not terrible, but
+## you could use real age-structure)
+Hx <- lapply(Mx, cumsum)
+lx <- lapply(Hx, function(h) exp(-h)) ## seq(Mx) is just 1 ... length(Mx)
+Nx = list()
+for (i in 1:nrow(N)) {
+  Nx[[i]] = N[i,] * lx[[i]] / sum(lx[[i]])
+}
+
+names(Nx) <- state_names
+```
+
+Truncate Mx values Nx values 
+```{r}
+Mx = lapply(Mx, function(x) x[65:111])
+Nx = lapply(Nx, function(x) x[65:111])
+```
+
+Check our code
+```{r}
+ ( e0 = bad_e0_fun(Mx[[1]]) ) 
+sum(Nx[[1]]) 
+length(Nx[[1]])
+length(Mx[[1]])
+```
+Ok, everything looks fine
+
+
+### bootstrap one e0
+
+For this we can do say 1000 trials and get the sampling variance of e0
+
+```{r}
+
+## let's first figure out variance of rate
+rate = 1/100
+size = 400 
+events <- NULL
+for (i in 1:10000){
+  x = rexp(n = size, rate = rate)
+  events[i] <- sum(x < 1)
+}
+print(var(events))
+```
+So variance is 4, which is equal to expected value, so poisson distributed, as it should be.
+
+```{r}
+events <- rpois(1000, lambda = 4)
+print(var(events))
+```
+Also works. So we can use rpois()
+
+
+```{r}
+
+my_boot <- function(Mx, Nx)
+{
+  ## does one draw on e0
+  n_ages = length(Nx)
+  expected_Dx = Mx * Nx ## death rate aged x * pop aged x
+  Dx_boot =  rpois(n_ages, lambda = expected_Dx)
+  Mx_boot = Dx_boot / Nx ## note Nx is not random, just Dx.
+  e0_boot = bad_e0_fun(Mx_boot)
+  return(e0_boot)
+}
+
+## test
+set.seed(3)
+for (i in 1:10)
+  print(  my_boot(Mx[[1]], Nx[[1]]) )
+```
+
+
+## sample variance
+
+```{r}
+n_trials = 10000
+e0.vec = NULL
+e0.vec.list = list()
+e0.var = NULL
+set.seed(19)
+for (i in 1:length(Mx)) {
+  for (j in 1:n_trials) {
+    e0.vec[j] = my_boot(Mx[[i]],Nx[[i]])
+    var.e0 = var(e0.vec)
+  }
+
+  e0.vec.list[[i]] = e0.vec 
+  e0.var[i] = var.e0
+}
+
+print(e0.var)
+
+```
+
+Above are the estimated sampling variances for each state based on the simulated e0s
+
+Compare this to Hanley's rule of thumb for SE
+
+$$
+150 \over \sqrt(N)
+$$ 
+```{r}
+print((150 / sqrt(N))^2)
+```
+
+
+## Our application
+
+We want to know for our country  the range of the sample variance would be for the fixed number of years (say 57) that we observed. We know the expected sample variance (which is about the 0.01 we just saw). But that would only be observed in an infinite number of years. In order to see how much range the sample variance actually has, we can bootstrap the estimate we would get with a sample of 57 years (which I just made up -- you might have 60 or so). We keep n_trials = 1000 (a big number), but we have n_years = 57
+
+```{r}
+n_trials = 1000
+n_years = 61
+e0.vec = NULL
+var_e0.vec = NULL
+var_e0.list = list()
+set.seed(18)
+for (k in 1:length(Mx)){
+  for (i in 1:n_trials)
+  {
+    if(i %% 100 == 0)
+      print(i)
+    e0.vec = NULL
+    for (j in 1:n_years)
+    {
+      e0.vec[j] = my_boot(Mx[[k]],Nx[[k]])
+    }
+    var_e0.vec[i] = var(e0.vec)
+  }
+  var_e0.list[[k]] = var_e0.vec
+}
+
+var_of_var_e0 = lapply(var_e0.list, var)
+se_of_var_e0 = lapply(var_e0.list, sd)
+print("var:") ; ( var_of_var_e0 )
+print("sd:") ; ( se_of_var_e0 ) 
+```
+Write data to csv 
+
+```{r}
+# create dataframe 
+df <- data.frame(cbind(e0.var, var_of_var_e0=unlist(var_of_var_e0), se_of_var_e0=unlist(se_of_var_e0)))
+row.names(df) <- state_names
+
+# save as csv
+write.csv(df, paste(path, "boot_results_e65.csv", sep = "/"), row.names = TRUE)
+```
+## confidence intervals
+
+So our confidence interval for the sampling variance $\sigma^2_{samp}$ should be something like
+
+$$
+\mbox{ expected value of } \sigma^2_{samp} \pm 2 * \mbox{SE of } \sigma^2_{samp}
+$$
+or, about
+$$
+0.01 \pm 2 * .002 = (0.006, 0.014),
+$$
+a pretty big range. 
+
