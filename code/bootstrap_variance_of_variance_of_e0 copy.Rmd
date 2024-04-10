@@ -34,23 +34,17 @@ for (i in 1:length(states)){
   file = paste(states[i], "bltper_1x1.csv", sep = "_")
   state_data[[i]] = read.csv(paste(path, file, sep = "/"))
 }
-
-us_data = read.csv(paste(path, "USA_bltper_1x1.csv", sep = "/"))
-
-combined_data = NULL
-combined_data[[1]] = us_data
-combined_data = c(combined_data, state_data)
 ```
 
 Mx values
 ```{r}
-Mx = lapply(combined_data, function(x) {
+Mx = lapply(state_data, function(x) {
   filtered_df <- x[x$Year == 1989, ]
   
   return(filtered_df$mx)
 })
 
-state_names <- sapply(combined_data, function(df) as.character(df$PopName[1]))
+state_names <- sapply(state_data, function(df) as.character(df$PopName[1]))
 
 names(Mx) <- state_names
 ```
@@ -68,7 +62,7 @@ Nx (pop size)
 ```{r}
 pop_89 = read.csv(paste(path, "89_pop.csv", sep = "/"), header = TRUE, row.names = 1)
 pop_89 = pop_89["Jul.89"] # filter to just year 1989
-N = subset(pop_89, !(rownames(pop_89) %in% c("DC")))
+N = subset(pop_89, !(rownames(pop_89) %in% c("US", "DC")))
 
 ## distribute by age (assuming stationarity probably not terrible, but
 ## you could use real age-structure)
@@ -156,7 +150,7 @@ for (i in 1:length(Mx)) {
 }
 
 print(e0.var)
-print(sqrt(e0.var))
+
 ```
 
 Above are the estimated sampling variances for each state based on the simulated e0s

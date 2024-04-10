@@ -2,6 +2,8 @@
 # some packages
 library(tidyverse) # version 
 library(whereami) # version
+library(ggExtra)
+library(gridExtra)
 
 # path
 script_dir <- whereami()
@@ -114,7 +116,7 @@ rwd_with_obs_error_bfgs <- function(y, ...)
            var_innov= var_innov,
            var_obs = var_obs))
 }
-
+rwd_with_obs_error_bfgs(state_e0[46,])
 # for use with later AIC/AICc function - RWD specification
 rwd_bfgs <- function(y, ...)
 {
@@ -131,6 +133,7 @@ rwd_bfgs <- function(y, ...)
   
   return(out2.marss)
 }
+
 
 # for use with later AIC/AICc function - STS specification
 rwd_obs_error_bfgs_out <- function(y, ...)
@@ -358,7 +361,7 @@ library(kableExtra)
 pop_89 = read.csv(paste(path, "89_pop.csv", sep = "/"), header = TRUE, row.names = 1)
 pop_89 = pop_89["Jul.89"] # filter to just year 1989
 
-samp_sd = 150/sqrt(pop_89) # create sampling standard deviation estimates using N from 89 (approximation given in Hanley 2022)
+pop_samp_sd = 150/sqrt(pop_89) # create sampling standard deviation estimates using N from 89 (approximation given in Hanley 2022)
 samp_sd = subset(samp_sd, !(rownames(samp_sd) %in% c("US", "DC"))) # get rid of observations not in USMDB 
 
 # construct StructTS table 
@@ -417,7 +420,8 @@ format_cell = function(cell_value) {
   if (is.na(cell_value)) {
     return(cell_spec("NA", "latex", background = "gray"))
   } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", "#FF9999", "white")) # changing this code to capture near 0 results in red 
+    # cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", "#FF9999", "white")) 
+    cell_spec(cell_value, "latex", background = "white")# changing this code to capture near 0 results in red 
   }
 }
 
@@ -610,9 +614,15 @@ obs_ub <- unlist(lapply(bfgs_with_cis, function(x) x[[25]][['R']]))
 samp_lb <- boot_results$e0.var - 2 * boot_results$se_of_var_e0
 samp_ub <- boot_results$e0.var + 2 * boot_results$se_of_var_e0
 
-shock_lb <- obs_lb - samp_ub
-shock_ub <- obs_ub - samp_lb
+# shock_lb <- obs_lb - samp_ub
+# shock_ub <- obs_ub - samp_lb
 shock_mean <- obs_var_new - boot_results$e0.var
+
+### trying suggestion from Josh 
+# assuming observation variance as a given (conditional on obs variance)
+# shock variance should have same se as samping variance 
+shock_lb <- shock_mean - 2 * boot_results$se_of_var_e0
+shock_ub <- shock_mean + 2 * boot_results$se_of_var_e0
 
 library(ggplot2)
 
@@ -672,25 +682,82 @@ rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
 
 # get latex code for MARSS BFGS
 kable(state_bfgs_table_red, 
-      caption = "Structural Time Series Model Results for Life Expectancy at Age 65", 
+      caption = "Structural Time Series Model Results for Life Expectancy at Birth", 
       format="latex", escape = FALSE) %>%
   kable_styling()
 
+### FIGURE VERSION OF TABLE ###
+pop_89_for_figure = subset(pop_89, !(rownames(pop_89) %in% c("US", "DC")))
+pop_89_for_figure = pop_89_for_figure / 1e6 # get population in millions
+state_table_for_figure = cbind(state_bfgs_table_round, pop_89_for_figure)
+state_table_for_figure = as.data.frame(state_table_for_figure)
+state_table_for_figure[] = lapply(state_table_for_figure, function(x) as.numeric(x))
+
+# remove states with 0 observation variance 
+state_table_for_figure = subset(state_table_for_figure, state_table_for_figure$observation.SD >= 0.000000001)
+
+# Create the scatterplot for process SD
+process <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(process.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(a) Process Standard Deviation")
+
+# Add the marginal histogram to the y-axis
+process <- ggExtra::ggMarginal(process, type = "histogram", margins = "y")
+
+# Display the plot
+print(process)
 
 
+# Create the scatterplot for observation variance
+obs <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(observation.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(b) Obs. Standard Deviation")
 
+# Add the marginal histogram to the y-axis
+obs <- ggExtra::ggMarginal(obs, type = "histogram", margins = "y")
 
+# Display the plot
+print(obs)
 
+# Create the scatterplot for sampling SD
+sampling <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(sampling.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(c) Sampling Standard Deviation")
 
+# Add the marginal histogram to the y-axis
+sampling <- ggExtra::ggMarginal(sampling, type = "histogram", margins = "y")
 
+# Display the plot
+print(sampling)
 
+# Create the scatterplot for shock
+shock <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(shock.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(d) Shock Standard Deviation")
 
+# Add the marginal histogram to the y-axis
+shock <- ggExtra::ggMarginal(shock, type = "histogram", margins = "y")
 
+# Display the plot
+print(shock)
 
-
-
-
-
+combined_plot <- grid.arrange(process, obs, sampling, shock, nrow=2)
 
 
 

@@ -25,34 +25,22 @@ path = normalizePath(path)
 
 Load in data
 ```{r}
-states = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", 
-           "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", 
-           "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", 
-           "WV", "WI", "WY")
-state_data = list()
-for (i in 1:length(states)){
-  file = paste(states[i], "bltper_1x1.csv", sep = "_")
-  state_data[[i]] = read.csv(paste(path, file, sep = "/"))
-}
-
+#### ENTIRE US ####
+# read in life tables for US
 us_data = read.csv(paste(path, "USA_bltper_1x1.csv", sep = "/"))
-
-combined_data = NULL
-combined_data[[1]] = us_data
-combined_data = c(combined_data, state_data)
+us_e0 = us_data$ex[us_data$Age == 0]
+no2020 = us_e0[1:61]
+plot(us_e0)
 ```
 
 Mx values
 ```{r}
-Mx = lapply(combined_data, function(x) {
-  filtered_df <- x[x$Year == 1989, ]
-  
-  return(filtered_df$mx)
-})
+filtered_df <- us_data[us_data$Year == 1989, ]
+Mx <- filtered_df$mx
 
-state_names <- sapply(combined_data, function(df) as.character(df$PopName[1]))
+#state_names <- sapply(state_data, function(df) as.character(df$PopName[1]))
 
-names(Mx) <- state_names
+#names(Mx) <- state_names
 ```
 
 ```{r}
@@ -68,26 +56,25 @@ Nx (pop size)
 ```{r}
 pop_89 = read.csv(paste(path, "89_pop.csv", sep = "/"), header = TRUE, row.names = 1)
 pop_89 = pop_89["Jul.89"] # filter to just year 1989
-N = subset(pop_89, !(rownames(pop_89) %in% c("DC")))
+# filter to only US
+N = subset(pop_89, (rownames(pop_89) %in% c("US")))
 
 ## distribute by age (assuming stationarity probably not terrible, but
 ## you could use real age-structure)
 Hx <- lapply(Mx, cumsum)
 lx <- lapply(Hx, function(h) exp(-h)) ## seq(Mx) is just 1 ... length(Mx)
-Nx = list()
-for (i in 1:nrow(N)) {
-  Nx[[i]] = N[i,] * lx[[i]] / sum(lx[[i]])
-}
+Nx = N * lx[[i]] / sum(lx[[i]])
 
-names(Nx) <- state_names
+
+# names(Nx) <- state_names
 ```
 
 Check our code
 ```{r}
- ( e0 = bad_e0_fun(Mx[[1]]) ) 
+ ( e0 = bad_e0_fun(Mx) ) 
 sum(Nx[[1]]) 
-length(Nx[[1]])
-length(Mx[[1]])
+length(Nx)
+length(Mx)
 ```
 Ok, everything looks fine
 
@@ -156,7 +143,7 @@ for (i in 1:length(Mx)) {
 }
 
 print(e0.var)
-print(sqrt(e0.var))
+
 ```
 
 Above are the estimated sampling variances for each state based on the simulated e0s

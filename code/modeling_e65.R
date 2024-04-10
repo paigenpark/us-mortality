@@ -215,16 +215,16 @@ rwd_with_obs_error_kem <- function(y, ...)
 #### ENTIRE US ####
 # read in life tables for US
 us_data = read.csv(paste(path, "USA_bltper_1x1.csv", sep = "/"))
-us_e0 = us_data$ex[us_data$Age == 65]
-no2020 = us_e0[1:61]
-plot(us_e0)
+ustate_e65 = us_data$ex[us_data$Age == 65]
+no2020 = ustate_e65[1:61]
+plot(ustate_e65)
 
 # fitting the structural time series models to aggregate US data
 # with StructTS
-us_sts = rwd_with_obs_error(us_e0)
+us_sts = rwd_with_obs_error(ustate_e65)
 # with MARSS (BFGS and kem)
-us_bfgs = rwd_with_obs_error_bfgs(us_e0) 
-us_kem = rwd_with_obs_error_kem(us_e0)
+us_bfgs = rwd_with_obs_error_bfgs(ustate_e65) 
+us_kem = rwd_with_obs_error_kem(ustate_e65)
 # this is not converging
     # user guide to MARSS suggests that if one of the elements on the diagonal 
     # of Q or R are going to 0 (are degenerate) then it will take the EM algorithm forever
@@ -285,34 +285,34 @@ for (i in 1:length(states)){
 }
 
 # create dataframe for all states life expectancy at birth
-s_e0 <- lapply(state_data, function(x) x$ex[x$Age == 65])
+state_e65 <- lapply(state_data, function(x) x$ex[x$Age == 65])
 full_state_names <- tolower(state.name[match(states, state.abb)]) # full state names to match map
-names(s_e0) = full_state_names
-state_e0 <- do.call(rbind, s_e0)
-colnames(state_e0) <- c(seq(1959,2020,1))
+names(state_e65) = full_state_names
+state_e65 <- do.call(rbind, state_e65)
+colnames(state_e65) <- c(seq(1959,2020,1))
 
 # create data with 2020 removed for testing impact of 2020 mortality on models 
-s_no2020 = state_e0[, -62]
+s_no2020 = state_e65[, -62]
 
 # create data with tenths of years of life expectancy as the units for less 0s
-state_e0_tenths = state_e0 * 10
+state_e65_tenths = state_e65 * 10
 
 # MARSS kem
 set.seed(10)
 state_kem = matrix(NA, nrow=50, ncol=3)
-state_kem = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_kem))
+state_kem = as.data.frame(apply(state_e65, 1, rwd_with_obs_error_kem))
 
 
 # MARSS BFGS
 set.seed(10)
 state_bfgs = matrix(NA, nrow=50, ncol=3)
-state_bfgs = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_bfgs))
+state_bfgs = as.data.frame(apply(state_e65, 1, rwd_with_obs_error_bfgs))
 
 
 # StructTS
 set.seed(10)
 state_sts = matrix(NA, nrow=50, ncol=3)
-state_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_error))
+state_sts = as.data.frame(apply(state_e65, 1, rwd_with_obs_error))
    
 
 # get names of states with var_obs = 0 
@@ -588,7 +588,7 @@ boot_results = read.csv(paste(path, "boot_results_e65.csv", sep = "/"), header =
 # to get sd/ci for first three columns of the table we're constructing, we need to get these from the 
 # MARSS output 
 set.seed(10)
-marss_out <- apply(state_e0, 1, rwd_obs_error_bfgs_out)
+marss_out <- apply(state_e65, 1, rwd_obs_error_bfgs_out)
 bfgs_with_cis <- lapply(marss_out, MARSSparamCIs)
 obs_var_new <- unlist(lapply(marss_out, function(x) coef(x)$R[1,1]))
 
@@ -604,9 +604,15 @@ obs_ub <- unlist(lapply(bfgs_with_cis, function(x) x[[25]][['R']]))
 samp_lb <- boot_results$e0.var - 2 * boot_results$se_of_var_e0
 samp_ub <- boot_results$e0.var + 2 * boot_results$se_of_var_e0
 
-shock_lb <- obs_lb - samp_ub
-shock_ub <- obs_ub - samp_lb
+# shock_lb <- obs_lb - samp_ub
+# shock_ub <- obs_ub - samp_lb
 shock_mean <- obs_var_new - boot_results$e0.var
+
+### trying suggestion from Josh 
+# assuming observation variance as a given (conditional on obs variance)
+# shock variance should have same se as samping variance 
+shock_lb <- shock_mean - 2 * boot_results$se_of_var_e0
+shock_ub <- shock_mean + 2 * boot_results$se_of_var_e0
 
 library(ggplot2)
 
@@ -687,11 +693,11 @@ text(x = state_bfgs_table$`observation SD`,
 ### COMPARING MODEL SELECTION CRITERIA BETWEEN RWD AND STS ###
 # STS with AIC and BIC 
 state_aic_bic_sts = matrix(NA, nrow=5, ncol=50)
-state_aic_bic_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_aic_bic))
+state_aic_bic_sts = as.data.frame(apply(state_e65, 1, rwd_with_obs_aic_bic))
 
 # RWD with AIC and BIC
 state_aic_bic_rwd = matrix(NA, nrow=4, ncol=50)
-state_aic_bic_rwd = as.data.frame(apply(state_e0, 1, rwd_aic_bic))
+state_aic_bic_rwd = as.data.frame(apply(state_e65, 1, rwd_aic_bic))
 
 # list of states with lower AIC for rwd model (is this a similar list to 0 obs var list?)
 aic_smaller_indices = which(state_aic_bic_rwd['aic', ] < state_aic_bic_sts['aic', ])
@@ -711,7 +717,7 @@ bic_smaller_states
 # or do we think AIC and BIC aren't the best criterion to use here? 
 
 ### COMPARING MODEL SELECTION CRITERIA USING MARSS BFGS ###
-aic_aicc = as.data.frame(t((apply(state_e0, 1, get_aic_aicc))))
+aic_aicc = as.data.frame(t((apply(state_e65, 1, get_aic_aicc))))
 colnames(aic_aicc) = c("rwd_aic", "sts_aic", "rwd_aicc", "sts_aicc")
 aic_aicc$rwd_aic <- round(aic_aicc$rwd_aic, 1)
 aic_aicc$sts_aic <- round(aic_aicc$sts_aic, 1)
@@ -746,70 +752,70 @@ kable(aic_aicc, "latex", escape = FALSE) %>%
 ### PLOTTING DATA AND PREDICTIONS FROM RWD AND STS ###
 
 # test with whole US data
-rwd_us = rwd_bfgs(us_e0)
-sts_us = rwd_obs_error_bfgs_out(us_e0)
+rwd_us = rwd_bfgs(ustate_e65)
+sts_us = rwd_obs_error_bfgs_out(ustate_e65)
 
 fit_rwd = fitted(rwd_us)
 fit_sts = fitted(sts_us)
 
-plot(us_e0)
+plot(ustate_e65)
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
 
 
 # The rwd and sts predictions look identical here, which makes sense given that 
 # the sts model estimates an obs variance of 0
-rwd_ca = rwd_bfgs(state_e0["california",])
-sts_ca = rwd_obs_error_bfgs_out(state_e0["california",])
+rwd_ca = rwd_bfgs(state_e65["california",])
+sts_ca = rwd_obs_error_bfgs_out(state_e65["california",])
 
 fit_rwd = fitted(rwd_ca)
 fit_sts = fitted(sts_ca)
 
-plot(state_e0["california",])
+plot(state_e65["california",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
 
 # testing on a state with a smaller population but still 0 obs variance 
-rwd_ct = rwd_bfgs(state_e0["connecticut",])
-sts_ct = rwd_obs_error_bfgs_out(state_e0["connecticut",])
+rwd_ct = rwd_bfgs(state_e65["connecticut",])
+sts_ct = rwd_obs_error_bfgs_out(state_e65["connecticut",])
 
 fit_rwd = fitted(rwd_ct)
 fit_sts = fitted(sts_ct)
 
-plot(state_e0["connecticut",])
+plot(state_e65["connecticut",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
 
-rwd_nc = rwd_bfgs(state_e0["north carolina",])
-sts_nc = rwd_obs_error_bfgs_out(state_e0["north carolina",])
+rwd_nc = rwd_bfgs(state_e65["north carolina",])
+sts_nc = rwd_obs_error_bfgs_out(state_e65["north carolina",])
 
 fit_rwd = fitted(rwd_nc)
 fit_sts = fitted(sts_nc)
 
-plot(state_e0["north carolina",])
+plot(state_e65["north carolina",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
 
 
 # an example of states with a high observation variance value and a stronger STS 
 # indicated by AIC values 
-rwd_ak = rwd_bfgs(state_e0["alaska",])
-sts_ak = rwd_obs_error_bfgs_out(state_e0["alaska",])
+rwd_ak = rwd_bfgs(state_e65["alaska",])
+sts_ak = rwd_obs_error_bfgs_out(state_e65["alaska",])
 
 fit_rwd = fitted(rwd_ak)
 fit_sts = fitted(sts_ak)
 
-plot(state_e0["alaska",])
+plot(state_e65["alaska",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
 
-rwd_ak = rwd_bfgs(state_e0["massachusetts",])
-sts_ak = rwd_obs_error_bfgs_out(state_e0["massachusetts",])
+rwd_ak = rwd_bfgs(state_e65["massachusetts",])
+sts_ak = rwd_obs_error_bfgs_out(state_e65["massachusetts",])
 
 fit_rwd = fitted(rwd_ak)
 fit_sts = fitted(sts_ak)
 
-plot(state_e0["massachusetts",])
+plot(state_e65["massachusetts",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
 
@@ -914,7 +920,7 @@ shapiro.test(state_resid)
 
 ### EXAMINING SPECIFIC STATE DISTURBANCE DISTRIBUTIONS ###
 # make residual plots using kem method
-s_resid = as.data.frame(apply(state_e0, 1, marss_kem_resid))
+s_resid = as.data.frame(apply(state_e65, 1, marss_kem_resid))
 
 # looking at state residuals for states with and without an estimated 0 
 # observation variance 
