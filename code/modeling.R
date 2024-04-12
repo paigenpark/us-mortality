@@ -116,7 +116,7 @@ rwd_with_obs_error_bfgs <- function(y, ...)
            var_innov= var_innov,
            var_obs = var_obs))
 }
-rwd_with_obs_error_bfgs(state_e0[46,])
+
 # for use with later AIC/AICc function - RWD specification
 rwd_bfgs <- function(y, ...)
 {
@@ -757,7 +757,7 @@ shock <- ggExtra::ggMarginal(shock, type = "histogram", margins = "y")
 # Display the plot
 print(shock)
 
-combined_plot <- grid.arrange(process, obs, sampling, shock, nrow=2)
+combined_plot <- grid.arrange(process, obs, nrow=1)
 
 
 
