@@ -1,2 +1,6 @@
 archive
 .DS_Store
+code/.Rhistory
+# pixi environments
+.pixi
+*.lock

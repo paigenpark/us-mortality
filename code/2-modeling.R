@@ -1,20 +1,13 @@
 ### SET-UP ###
 # some packages
 library(tidyverse) # version 
-library(whereami) # version
-library(plotrix)
-
-# path
-script_dir <- whereami()
-path <- file.path(script_dir, "../../data") # assumes this R script is in a code folder, 
-                                            # this goes up two levels from current script location  
-                                            # into the main directory, then back down into data folder
-path = normalizePath(path)
+library(here) # version
+library(ggExtra)
+library(gridExtra)
 
 
 
-
-### ADDING WRAPPER FUNCTIONS ###
+### WRAPPER FUNCTIONS FOR STS MODELS ###
 
 ### STRUCTTS ###
 # random walk with drift (RWD) specification
@@ -27,7 +20,7 @@ rwd <- function(y){
 }
 
 # structural time series (STS) specification = RWD + observation error
-rwd_with_obs_error <- function(y, ..., maxit = 4000){
+rwd_with_obs_error <- function(y, ..., maxit = 5000){
   sts = StructTS(x = y, type = "trend", fixed = c(NA, 0, NA), ...,
                  optim.control = list(maxit = maxit))
   d.hat = sts$model$a[2]
@@ -116,7 +109,6 @@ rwd_with_obs_error_bfgs <- function(y, ...)
            var_obs = var_obs))
 }
 
-
 # for use with later AIC/AICc function - RWD specification
 rwd_bfgs <- function(y, ...)
 {
@@ -134,7 +126,8 @@ rwd_bfgs <- function(y, ...)
   return(out2.marss)
 }
 
-# for use with later AIC/AICc function and CIs - STS specification
+
+# for use with later AIC/AICc function - STS specification
 rwd_obs_error_bfgs_out <- function(y, ...)
 {
   library(MARSS)
@@ -203,116 +196,34 @@ rwd_with_obs_error_kem <- function(y, ...)
            var_obs = var_obs))
 }
 
-# No model selection criteria functions created yet for KEM method, could do this later if needed 
 
 
 
 
 
 
-###### READ IN DATA - SET UP E0 DATASETS - FIT PRELIMINARY MODELS #####
+###### RUN MODELS #####
 
-#### ENTIRE US ####
-# read in life tables for US
-us_data = read.csv(paste(path, "USA_bltper_1x1.csv", sep = "/"))
-ustate_e65 = us_data$ex[us_data$Age == 65]
-no2020 = ustate_e65[1:61]
-plot(ustate_e65)
-
-# fitting the structural time series models to aggregate US data
-# with StructTS
-us_sts = rwd_with_obs_error(ustate_e65)
-# with MARSS (BFGS and kem)
-us_bfgs = rwd_with_obs_error_bfgs(ustate_e65) 
-us_kem = rwd_with_obs_error_kem(ustate_e65)
-# this is not converging
-    # user guide to MARSS suggests that if one of the elements on the diagonal 
-    # of Q or R are going to 0 (are degenerate) then it will take the EM algorithm forever
-    # to get to 0 
-rbind(us_sts, us_bfgs, us_kem)
-
-
-
-
-#### CENSUS DIVSIONS ####
-# read in life tables for Census divisions
-divisions = c(1:9)
-div_data = list()
-for (i in 1:length(divisions)){
-  file = paste("Div", divisions[i], "_bltper_1x1.csv", sep = "")
-  div_data[[i]] = read.csv(paste(path, file, sep = "/"))
-}
-
-# create dataframe for census divisions life expectancy at birth
-d_e0 <- lapply(div_data, function(x) x$ex[x$Age == 65])
-full_div_names <- c("new england", "middle atlantic", "east north central", "west north central", 
-                    "south atlantic","east south central", "west south central", "mountain", 
-                    "pacific")
-names(d_e0) = full_div_names
-div_e0 <- do.call(rbind, d_e0)
-colnames(div_e0) <- c(seq(1959,2020,1))
-
-# MARSS BFGS
-div_bfgs = matrix(NA, nrow=9, ncol=3)
-div_bfgs = as.data.frame(apply(div_e0, 1, rwd_with_obs_error_bfgs))
-
-# MARSS KEM
-div_kem = matrix(NA, nrow=9, ncol=3)
-div_kem = as.data.frame(apply(div_e0, 1, rwd_with_obs_error_kem))
-
-# StructTS
-div_sts = matrix(NA, nrow=9, ncol=3)
-div_sts = as.data.frame(apply(div_e0, 1, rwd_with_obs_error))
-
-
-# get names of divisions with var_obs = 0
-div_no_obs = which(div_sts[3,]==0)
-div_no_obs = colnames(div_sts)[div_no_obs]
-div_no_obs
-
-
-
-#### STATES ####
-# read in life tables for all 50 states 
-states = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", 
-           "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", 
-           "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", 
-           "WV", "WI", "WY")
-state_data = list()
-for (i in 1:length(states)){
-  file = paste(states[i], "bltper_1x1.csv", sep = "_")
-  state_data[[i]] = read.csv(paste(path, file, sep = "/"))
-}
-
-# create dataframe for all states life expectancy at birth
-state_e65 <- lapply(state_data, function(x) x$ex[x$Age == 65])
-full_state_names <- tolower(state.name[match(states, state.abb)]) # full state names to match map
-names(state_e65) = full_state_names
-state_e65 <- do.call(rbind, state_e65)
-colnames(state_e65) <- c(seq(1959,2020,1))
-
-# create data with 2020 removed for testing impact of 2020 mortality on models 
-s_no2020 = state_e65[, -62]
-
-# create data with tenths of years of life expectancy as the units for less 0s
-state_e65_tenths = state_e65 * 10
+state_e0 = read.csv(here("data", "combined_e0.csv"), header = TRUE, row.names = 1)
 
 # MARSS kem
-set.seed(10)
 state_kem = matrix(NA, nrow=50, ncol=3)
-state_kem = as.data.frame(apply(state_e65, 1, rwd_with_obs_error_kem))
-
+state_kem = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_kem))
+  # results in 6 states that don't converge when used with "kem" method
+  # results in 8 states that don't converge when run on data excluding 2020
 
 # MARSS BFGS
-set.seed(10)
 state_bfgs = matrix(NA, nrow=50, ncol=3)
-state_bfgs = as.data.frame(apply(state_e65, 1, rwd_with_obs_error_bfgs))
-
+state_bfgs = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_bfgs))
+  # results in 6 states with near 0 observation variance 
+  # results in 6 states with 0 observation variance when 2020 is excluded
 
 # StructTS
-set.seed(10)
 state_sts = matrix(NA, nrow=50, ncol=3)
-state_sts = as.data.frame(apply(state_e65, 1, rwd_with_obs_error))
+state_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_error))
+    # results in 13 states with 0 observation variance
+    # results in 10 states with 0 observation variance when using data excluding 2020
+    # help page for StructTS says that it's not uncommon for 0's to occur
    
 
 # get names of states with var_obs = 0 
@@ -328,26 +239,41 @@ state_no_obs_bfgs = which(state_bfgs[3,]<=0.0000000001)
 state_no_obs_bfgs = colnames(state_bfgs)[state_no_obs_bfgs]
 state_no_obs_bfgs
 
+## BAR PLOT OF 0 OBS_VAR BY METHOD ##
 
+barchart_data <- data.frame(
+  state = full_state_names,
+  MARSS_BFGS = full_state_names %in% state_no_obs_bfgs,
+  StructTS = full_state_names %in% state_no_obs_sts
+)
 
+# Reshape data to long format
+long_data <- pivot_longer(barchart_data, cols = c(MARSS_BFGS, StructTS), names_to = "method", values_to = "has_no_obs")
 
+# Filter to keep only TRUE values
+long_data <- long_data[long_data$has_no_obs == TRUE, ]
 
+# Create a stacked bar chart
+p_barchart <- ggplot(long_data, aes(x = method, fill = state)) +
+  geom_bar() +
+  labs(y = "Count of States with Estimate of Zero for Observation Variance", fill = "State", x=NULL) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Adjust the x-axis labels if necessary
+ggsave(here("results", "zero_obs_var_barchart.pdf"), p_barchart)
 
 ##### GENERATING TABLES OF DRIFT, INNOV SD, OBS SD, SAMPLING SD, & SHOCK SD #####
 library(knitr)
 library(kableExtra)
 
-# get estimate for N to use in sampling SD approximation: 
-# I use the population estimates from the mid-point year of the time series (1989) 
+# get estimate for N to use in sampling SD approximation: I use the population estimates from the mid-point year of the time series (1989) 
 # if population growth is roughly linear during this time span that would be a reasonable thing to do
 
 # load in population data from the Census (data includes pop by state from 1985 to 1989)
 pop_89 = read.csv(paste(path, "89_pop.csv", sep = "/"), header = TRUE, row.names = 1)
 pop_89 = pop_89["Jul.89"] # filter to just year 1989
 
-# create sampling standard deviation estimates using N from 89 (approximation given in Hanley 2022)
-samp_sd_hanley = 150/sqrt(pop_89) 
-samp_sd_hanley = subset(samp_sd_hanley, !(rownames(samp_sd_hanley) %in% c("US", "DC"))) # get rid of observations not in USMDB 
+pop_samp_sd = 150/sqrt(pop_89) # create sampling standard deviation estimates using N from 89 (approximation given in Hanley 2022)
+samp_sd = subset(samp_sd, !(rownames(samp_sd) %in% c("US", "DC"))) # get rid of observations not in USMDB 
 
 # construct StructTS table 
 state_sts_table = t(state_sts)
@@ -392,21 +318,21 @@ state_bfgs_table = state_bfgs_table %>%
   mutate(shock_sd = var_obs - Jul.89^2) %>% # get shock sd through additive property of var
   mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), shock_sd = sqrt(shock_sd)) # changing all of the variances to SDs
 
-colnames(state_bfgs_table) = c("drift", "process SD", "observation SD", "sampling SD", "shock SD")
-# state_bfgs_table$shock_SD <- ifelse(state_bfgs_table$shock_SD < 0, NA, state_bfgs_table$shock_SD)
+colnames(state_bfgs_table) = c("drift", "process_SD", "observation_SD", "sampling_SD", "shock_SD")
+state_bfgs_table$shock_SD <- ifelse(state_bfgs_table$shock_SD < 0, NA, state_bfgs_table$shock_SD)
 
 # round 
 library(scales)
-state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.001) else x))
+state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.00000001) else x))
 
 # convert cells with 0 to red 
 state_bfgs_table_red = state_bfgs_table_round
 format_cell = function(cell_value) {
   if (is.na(cell_value)) {
-    return(cell_spec("$\sim$ 0", "latex"))
+    return(cell_spec("NA", "latex", background = "gray"))
   } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", 
-                                                       "#FF9999", "white")) # changing this code to capture near 0 results in red 
+    # cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", "#FF9999", "white")) 
+    cell_spec(cell_value, "latex", background = "white")# changing this code to capture near 0 results in red 
   }
 }
 
@@ -417,15 +343,8 @@ state_bfgs_table_red[] = as.data.frame(sapply(state_bfgs_table_round, function(c
 rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
 
 # get latex code for MARSS BFGS
-kable(state_bfgs_table_red, 
-      caption = "Structural Time Series Model Results for Life Expectancy at Age 65", 
-      format="latex", escape = FALSE) %>%
+kable(state_bfgs_table_red, caption = "MARSS BFGS Results", format="latex", escape = FALSE) %>%
   kable_styling()
-
-# checking obs var and shock var correlation
-state_bfgs_table_0 = state_bfgs_table
-state_bfgs_table_0$`shock SD` = state_bfgs_table$`shock SD`
-plot(state_bfgs_table$`observation SD`, state_bfgs_table$`shock SD`)
 
 
 # construct MARSS kem table
@@ -576,11 +495,13 @@ kable(state_kem_table_red, caption = "MARSS KEM Results", format="latex", escape
 
 
 
+
+
 #### TABLES WITH BOOTSTRAP SAMPLING SD AND CONFIDENCE INTERVALS ####
 # load in sampling standard deviation estimates (and CIs) created using bootstrap approach
 # code for creating of these estimates can be found at in code file: 
 # bootstrap_variance_of_variance_of_e0.RMD
-boot_results = read.csv(paste(path, "boot_results_e65.csv", sep = "/"), header = TRUE, row.names = 1)
+boot_results = read.csv(paste(path, "boot_results.csv", sep = "/"), header = TRUE, row.names = 1)
 
 # the e0.var column in boot_results should replace the samp_var column in the prior table
 # the sd column in boot_results can be used to calculate confidence intervals for the samp_var column
@@ -588,7 +509,7 @@ boot_results = read.csv(paste(path, "boot_results_e65.csv", sep = "/"), header =
 # to get sd/ci for first three columns of the table we're constructing, we need to get these from the 
 # MARSS output 
 set.seed(10)
-marss_out <- apply(state_e65, 1, rwd_obs_error_bfgs_out)
+marss_out <- apply(state_e0, 1, rwd_obs_error_bfgs_out)
 bfgs_with_cis <- lapply(marss_out, MARSSparamCIs)
 obs_var_new <- unlist(lapply(marss_out, function(x) coef(x)$R[1,1]))
 
@@ -600,7 +521,7 @@ obs_var_new <- unlist(lapply(marss_out, function(x) coef(x)$R[1,1]))
 # R param = observation variance 
 obs_lb <- unlist(lapply(bfgs_with_cis, function(x) x[[26]][['R']]))
 obs_ub <- unlist(lapply(bfgs_with_cis, function(x) x[[25]][['R']]))
-  
+
 samp_lb <- boot_results$e0.var - 2 * boot_results$se_of_var_e0
 samp_ub <- boot_results$e0.var + 2 * boot_results$se_of_var_e0
 
@@ -627,14 +548,15 @@ data <- data.frame(
 data$State <- reorder(data$State, data$Mean)
 
 # Dot chart with confidence intervals
-ggplot(data, aes(x = State, y = Mean)) +
+p_dotchart <- ggplot(data, aes(x = State, y = Mean)) +
   geom_point() +
   geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "red") + 
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
   coord_flip() +
   xlab("") +
   ylab("Shock Variance") +
   theme_minimal()
+ggsave(here("results", "shock_variance_dotchart.pdf"), p_dotchart)
 
 
 # construct MARSS BFGS table with bootstrap variance
@@ -672,20 +594,84 @@ rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
 
 # get latex code for MARSS BFGS
 kable(state_bfgs_table_red, 
-      caption = "Structural Time Series Model Results for Life Expectancy at Age 65", 
+      caption = "Structural Time Series Model Results for Life Expectancy at Birth", 
       format="latex", escape = FALSE) %>%
   kable_styling()
 
-# checking obs var and shock var correlation
-state_bfgs_table_0 = state_bfgs_table
-state_bfgs_table_0$`shock SD` = state_bfgs_table$`shock SD`
-plot(state_bfgs_table$`observation SD`, state_bfgs_table$`shock SD`)
+### FIGURE VERSION OF TABLE ###
+pop_89_for_figure = subset(pop_89, !(rownames(pop_89) %in% c("US", "DC")))
+pop_89_for_figure = pop_89_for_figure / 1e6 # get population in millions
+state_table_for_figure = cbind(state_bfgs_table_round, pop_89_for_figure)
+state_table_for_figure = as.data.frame(state_table_for_figure)
+state_table_for_figure[] = lapply(state_table_for_figure, function(x) as.numeric(x))
 
-text(x = state_bfgs_table$`observation SD`, 
-     y = state_bfgs_table$`shock SD`, 
-     labels = rownames(state_bfgs_table), 
-     pos = 3, # Adjusts the position of the text relative to the point (3 = above)
-     cex = 0.8) #
+# remove states with 0 observation variance 
+state_table_for_figure = subset(state_table_for_figure, state_table_for_figure$observation.SD >= 0.000000001)
+
+# Create the scatterplot for process SD
+process <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(process.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(a) Process Standard Deviation")
+
+# Add the marginal histogram to the y-axis
+process <- ggExtra::ggMarginal(process, type = "histogram", margins = "y")
+
+# Save the plot
+ggsave(here("results", "scatter_process_sd.pdf"), process)
+
+
+# Create the scatterplot for observation variance
+obs <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(observation.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(b) Obs. Standard Deviation")
+
+# Add the marginal histogram to the y-axis
+obs <- ggExtra::ggMarginal(obs, type = "histogram", margins = "y")
+
+# Save the plot
+ggsave(here("results", "scatter_obs_sd.pdf"), obs)
+
+# Create the scatterplot for sampling SD
+sampling <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(sampling.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(c) Sampling Standard Deviation")
+
+# Add the marginal histogram to the y-axis
+sampling <- ggExtra::ggMarginal(sampling, type = "histogram", margins = "y")
+
+# Save the plot
+ggsave(here("results", "scatter_sampling_sd.pdf"), sampling)
+
+# Create the scatterplot for shock
+shock <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(shock.SD))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
+       title = "(d) Shock Standard Deviation")
+
+# Add the marginal histogram to the y-axis
+shock <- ggExtra::ggMarginal(shock, type = "histogram", margins = "y")
+
+# Save the plot
+ggsave(here("results", "scatter_shock_sd.pdf"), shock)
+
+combined_plot <- grid.arrange(process, obs, nrow=1)
+ggsave(here("results", "scatter_combined.pdf"), combined_plot)
+
 
 
 
@@ -693,11 +679,11 @@ text(x = state_bfgs_table$`observation SD`,
 ### COMPARING MODEL SELECTION CRITERIA BETWEEN RWD AND STS ###
 # STS with AIC and BIC 
 state_aic_bic_sts = matrix(NA, nrow=5, ncol=50)
-state_aic_bic_sts = as.data.frame(apply(state_e65, 1, rwd_with_obs_aic_bic))
+state_aic_bic_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_aic_bic))
 
 # RWD with AIC and BIC
 state_aic_bic_rwd = matrix(NA, nrow=4, ncol=50)
-state_aic_bic_rwd = as.data.frame(apply(state_e65, 1, rwd_aic_bic))
+state_aic_bic_rwd = as.data.frame(apply(state_e0, 1, rwd_aic_bic))
 
 # list of states with lower AIC for rwd model (is this a similar list to 0 obs var list?)
 aic_smaller_indices = which(state_aic_bic_rwd['aic', ] < state_aic_bic_sts['aic', ])
@@ -717,14 +703,43 @@ bic_smaller_states
 # or do we think AIC and BIC aren't the best criterion to use here? 
 
 ### COMPARING MODEL SELECTION CRITERIA USING MARSS BFGS ###
-aic_aicc = as.data.frame(t((apply(state_e65, 1, get_aic_aicc))))
+aic_aicc = as.data.frame(t((apply(state_e0, 1, get_aic_aicc))))
 colnames(aic_aicc) = c("rwd_aic", "sts_aic", "rwd_aicc", "sts_aicc")
 aic_aicc$rwd_aic <- round(aic_aicc$rwd_aic, 1)
 aic_aicc$sts_aic <- round(aic_aicc$sts_aic, 1)
 aic_aicc$rwd_aicc <- round(aic_aicc$rwd_aicc, 1)
 aic_aicc$sts_aicc <- round(aic_aicc$sts_aicc, 1)
 
+# prep barchart
+aic = aic_aicc[,1:2]
+aic = rownames_to_column(aic, "state")
+aic$diff = aic$sts_aic - aic$rwd_aic
 
+# pure AIC value plot 
+aic_long = pivot_longer(aic, cols=c("rwd_aic", "sts_aic"), names_to="model", values_to="AIC")
+
+p_aic_comparison <- ggplot(aic_long, aes(x = state, y = AIC, fill = model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Adjust text angle and justification for readability
+  labs(title = "Comparison of AIC Values by State",
+       x = "State",
+       y = "AIC Value",
+       fill = "Model")
+ggsave(here("results", "aic_comparison.pdf"), p_aic_comparison)
+
+# difference plot
+p_aic_diff <- ggplot(aic, aes(x = state, y = diff, fill = diff > 0)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  scale_fill_manual(values = c("TRUE" = "lightblue", "FALSE" = "darkblue"),
+                    name = "Model Better",
+                    labels = c("TRUE" = "RWD Better", "FALSE" = "STS Better")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "State",
+       y = "AIC Difference")
+ggsave(here("results", "aic_difference.pdf"), p_aic_diff)
+
+# prep table
 aic_smaller_for_rwd = which(aic_aicc[ ,'rwd_aic'] < aic_aicc[ ,'sts_aic'])
 aic_smaller_for_rwd = rownames(aic_aicc)[aic_smaller_for_rwd]
 
@@ -752,257 +767,89 @@ kable(aic_aicc, "latex", escape = FALSE) %>%
 ### PLOTTING DATA AND PREDICTIONS FROM RWD AND STS ###
 
 # test with whole US data
-rwd_us = rwd_bfgs(ustate_e65)
-sts_us = rwd_obs_error_bfgs_out(ustate_e65)
+rwd_us = rwd_bfgs(us_e0)
+sts_us = rwd_obs_error_bfgs_out(us_e0)
 
 fit_rwd = fitted(rwd_us)
 fit_sts = fitted(sts_us)
 
-plot(ustate_e65)
+pdf(here("results", "fitted_us.pdf"))
+plot(us_e0)
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
+dev.off()
 
 
 # The rwd and sts predictions look identical here, which makes sense given that 
 # the sts model estimates an obs variance of 0
-rwd_ca = rwd_bfgs(state_e65["california",])
-sts_ca = rwd_obs_error_bfgs_out(state_e65["california",])
+rwd_ca = rwd_bfgs(state_e0["california",])
+sts_ca = rwd_obs_error_bfgs_out(state_e0["california",])
 
 fit_rwd = fitted(rwd_ca)
 fit_sts = fitted(sts_ca)
 
-plot(state_e65["california",])
+pdf(here("results", "fitted_california.pdf"))
+plot(state_e0["california",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
+dev.off()
 
-# testing on a state with a smaller population but still 0 obs variance 
-rwd_ct = rwd_bfgs(state_e65["connecticut",])
-sts_ct = rwd_obs_error_bfgs_out(state_e65["connecticut",])
+# testing on a state with a smaller population but still 0 obs variance
+rwd_ct = rwd_bfgs(state_e0["connecticut",])
+sts_ct = rwd_obs_error_bfgs_out(state_e0["connecticut",])
 
 fit_rwd = fitted(rwd_ct)
 fit_sts = fitted(sts_ct)
 
-plot(state_e65["connecticut",])
+pdf(here("results", "fitted_connecticut.pdf"))
+plot(state_e0["connecticut",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
+dev.off()
 
-rwd_nc = rwd_bfgs(state_e65["north carolina",])
-sts_nc = rwd_obs_error_bfgs_out(state_e65["north carolina",])
+rwd_nc = rwd_bfgs(state_e0["north carolina",])
+sts_nc = rwd_obs_error_bfgs_out(state_e0["north carolina",])
 
 fit_rwd = fitted(rwd_nc)
 fit_sts = fitted(sts_nc)
 
-plot(state_e65["north carolina",])
+pdf(here("results", "fitted_north_carolina.pdf"))
+plot(state_e0["north carolina",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
+dev.off()
 
 
-# an example of states with a high observation variance value and a stronger STS 
-# indicated by AIC values 
-rwd_ak = rwd_bfgs(state_e65["alaska",])
-sts_ak = rwd_obs_error_bfgs_out(state_e65["alaska",])
+# an example of states with a high observation variance value and a stronger STS
+# indicated by AIC values
+rwd_ak = rwd_bfgs(state_e0["alaska",])
+sts_ak = rwd_obs_error_bfgs_out(state_e0["alaska",])
 
 fit_rwd = fitted(rwd_ak)
 fit_sts = fitted(sts_ak)
 
-plot(state_e65["alaska",])
+pdf(here("results", "fitted_alaska.pdf"))
+plot(state_e0["alaska",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
+dev.off()
 
-rwd_ak = rwd_bfgs(state_e65["massachusetts",])
-sts_ak = rwd_obs_error_bfgs_out(state_e65["massachusetts",])
+rwd_ak = rwd_bfgs(state_e0["massachusetts",])
+sts_ak = rwd_obs_error_bfgs_out(state_e0["massachusetts",])
 
 fit_rwd = fitted(rwd_ak)
 fit_sts = fitted(sts_ak)
 
-plot(state_e65["massachusetts",])
+pdf(here("results", "fitted_massachusetts.pdf"))
+plot(state_e0["massachusetts",])
 lines(fit_rwd[,4], col = "red")
 lines(fit_sts[,4], col = "blue")
+dev.off()
 
 
 
 
 
 
-
-### ADDITIONAL ANALYSES ###
-
-
-### RUNNING MODELS WITH BAYESIAN DATA ###
-bayes_data = readRDS(paste(path, "USA_b_county_lt.rds", sep="/"))
-e0_bayes = bayes_data %>% 
-  filter(age == 0) %>%
-  select(fips, year, ex)
-# reshape data with "spread"
-e0_bayes = e0_bayes %>%
-  spread(key = year, value = ex)
-e0_bayes = e0_bayes[,-1]
-
-states_dc = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", 
-              "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", 
-              "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", 
-              "WV", "WI", "WY")
-rownames(e0_bayes) = states_dc
-
-# MARSS kem
-bayes_kem = matrix(NA, nrow=51, ncol=3)
-bayes_kem = as.data.frame(apply(e0_bayes, 1, rwd_with_obs_error_kem))
-# results in 8 states that don't converge when used with "kem" method
-
-# MARSS BFGS
-bayes_bfgs = matrix(NA, nrow=51, ncol=3)
-bayes_bfgs = as.data.frame(apply(e0_bayes, 1, rwd_with_obs_error_bfgs))
-# results in 10 states with 0 observation variance 
-
-# StructTS
-bayes_sts = matrix(NA, nrow=51, ncol=3)
-bayes_sts = as.data.frame(apply(e0_bayes, 1, rwd_with_obs_error))
-# results in 13 states with 0 observation variance
-
-# get names of states with var_obs = 0 
-bayes_no_obs_kem = which(is.na(state_kem[3,]))
-bayes_no_obs_kem = colnames(state_kem)[state_no_obs_kem]
-bayes_no_obs_kem
-
-bayes_no_obs_bfgs = which(bayes_bfgs[3,]<=0.0000000001)
-bayes_no_obs_bfgs = colnames(bayes_bfgs)[bayes_no_obs_bfgs]
-bayes_no_obs_bfgs
-
-bayes_no_obs_sts = which(bayes_sts[3,]==0)
-bayes_no_obs_sts = colnames(bayes_sts)[bayes_no_obs_sts]
-bayes_no_obs_sts
-
-
-## EXAMINING DISTURBANCE DISTRIBUTIONS ##
-# create resid function
-marss_kem_resid <- function(y, ...)
-{
-  library(MARSS)
-  mod.list.2 <- list(B = matrix(1),
-                     U = matrix("d"),
-                     Q = matrix("q"),
-                     Z = matrix(1),
-                     A = matrix(0),
-                     R = matrix("r"),
-                     x0 = matrix("mu"),
-                     tinitx = 0)
-  out2.marss = MARSS(y, model = mod.list.2, control=list(maxit=1000), method= "kem", ...)
-  
-  resid = residuals(out2.marss, type = "tT")
-  model <- subset(resid, name=="model")
-  state <- subset(resid, name=="state")
-  return(list(model, state))
-}
-
-# examining distribution of disturbances with no2020 state data 
-kem_resid = marss_kem_resid(no2020)
-
-# model residuals
-model_resid = kem_resid[[1]]$.resids
-# histogram
-hist(model_resid, breaks = 50)
-# qqplots
-qqnorm(model_resid)
-qqline(model_resid)
-# Shapiro-Wilk normality test
-shapiro.test(model_resid)
-
-# state residuals
-state_resid = kem_resid[[2]]$.resids
-# histogram
-hist(state_resid, breaks = 50)
-# qqplots
-qqnorm(state_resid)
-qqline(state_resid)
-# Shapiro-Wilk normality test
-shapiro.test(state_resid)
-
-
-### EXAMINING SPECIFIC STATE DISTURBANCE DISTRIBUTIONS ###
-# make residual plots using kem method
-s_resid = as.data.frame(apply(state_e65, 1, marss_kem_resid))
-
-# looking at state residuals for states with and without an estimated 0 
-# observation variance 
-
-# states with 0 obs variance examined below 
-  # Florida 
-  # New York
-
-# states with non-0 obs variance examined below
-  # Utah
-  # Georgia 
-
-# Florida model residuals 
-# histogram
-hist(s_resid$florida..resids, breaks = 50)
-# qqplots
-qqnorm(s_resid$florida..resids)
-qqline(s_resid$florida..resids)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$florida..resids)
-
-# Florida state residuals 
-# histogram
-hist(s_resid$florida..resids.1, breaks = 50)
-# qqplots
-qqnorm(s_resid$florida..resids.1)
-qqline(s_resid$florida..resids.1)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$florida..resids.1)
-
-# NY model residuals 
-# histogram
-hist(s_resid$new.york..resids, breaks = 50)
-# qqplots
-qqnorm(s_resid$new.york..resids)
-qqline(s_resid$new.york..resids)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$new.york..resids)
-
-# NY state residuals 
-# histogram
-hist(s_resid$new.york..resids.1, breaks = 50)
-# qqplots
-qqnorm(s_resid$new.york..resids.1)
-qqline(s_resid$new.york..resids.1)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$new.york..resids.1)
-
-# Utah model residuals 
-# histogram
-hist(s_resid$utah..resids, breaks = 50)
-# qqplots
-qqnorm(s_resid$utah..resids)
-qqline(s_resid$utah..resids)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$utah..resids)
-
-# Utah state residuals 
-# histogram
-hist(s_resid$utah..resids.1, breaks = 50)
-# qqplots
-qqnorm(s_resid$utah..resids.1)
-qqline(s_resid$utah..resids.1)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$utah..resids.1)
-
-# Georgia model residuals 
-# histogram
-hist(s_resid$georgia..resids, breaks = 50)
-# qqplots
-qqnorm(s_resid$georgia..resids)
-qqline(s_resid$georgia..resids)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$georgia..resids)
-
-# Georgia state residuals 
-# histogram
-hist(s_resid$georgia..resids.1, breaks = 50)
-# qqplots
-qqnorm(s_resid$georgia..resids.1)
-qqline(s_resid$georgia..resids.1)
-# Shapiro-Wilk normality test
-shapiro.test(s_resid$georgia..resids.1)
 
 
