@@ -6,6 +6,7 @@ platforms = ["osx-arm64"]
 version = "0.1.0"
 
 [tasks]
+setup = "Rscript -e 'renv::restore()'"
 
 [dependencies]
 r-base = ">=4.5.2,<4.6"

@@ -10,17 +10,13 @@ Note: all values are made up and need replacing with real ones
 Note: my formula for e0 could also be improved.
 ```{r}
 library(tidyverse) 
-library(whereami)
+library(here)
 ```
 
 Set up path
 ```{r}
 # path
-script_dir <- whereami()
-path <- file.path(script_dir, "../../data") # assumes this R script is in a code folder, 
-                                            # this goes up two levels from current script location  
-                                            # into the main directory, then back down into data folder
-path = normalizePath(path)
+path <- here("data") 
 ```
 
 Load in data
@@ -211,7 +207,7 @@ df <- data.frame(cbind(e0.var, var_of_var_e0=unlist(var_of_var_e0), se_of_var_e0
 row.names(df) <- state_names
 
 # save as csv
-write.csv(df, paste(path, "boot_results.csv", sep = "/"), row.names = TRUE)
+write.csv(df, paste(path, "boot_results_v2.csv", sep = "/"), row.names = TRUE)
 ```
 ## confidence intervals
 

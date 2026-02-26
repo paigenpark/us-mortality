@@ -4,6 +4,8 @@ library(tidyverse) # version
 library(here) # version
 library(ggExtra)
 library(gridExtra)
+library(MARSS)
+library(KFAS)
 
 
 
@@ -82,7 +84,7 @@ rwd_with_obs_aic_bic <- function(y, ..., maxit = 4000){
 ## BFGS ##
 rwd_with_obs_error_bfgs <- function(y, ...)
 {
-  library(MARSS)
+ 
   mod.list.2 <- list(B = matrix(1),
                      U = matrix("d"),
                      Q = matrix("q"),
@@ -112,7 +114,7 @@ rwd_with_obs_error_bfgs <- function(y, ...)
 # for use with later AIC/AICc function - RWD specification
 rwd_bfgs <- function(y, ...)
 {
-  library(MARSS)
+  
   mod.list.2 <- list(B = matrix(1),
                      U = matrix("d"),
                      Q = matrix("q"),
@@ -130,7 +132,7 @@ rwd_bfgs <- function(y, ...)
 # for use with later AIC/AICc function - STS specification
 rwd_obs_error_bfgs_out <- function(y, ...)
 {
-  library(MARSS)
+  
   mod.list.2 <- list(B = matrix(1),
                      U = matrix("d"),
                      Q = matrix("q"),
@@ -169,7 +171,6 @@ get_aicbp_aicbb <- function(y, ...) {
 ## KEM ##
 rwd_with_obs_error_kem <- function(y, ...)
 {
-  library(MARSS)
   mod.list.2 <- list(B = matrix(1),
                      U = matrix("d"),
                      Q = matrix("q"),
@@ -196,11 +197,60 @@ rwd_with_obs_error_kem <- function(y, ...)
            var_obs = var_obs))
 }
 
+### KFAS ###
+run_kfas <- function(y, known_sampling_var, ...) {
+
+  y <- as.numeric(y)
+
+  # SSMtrend(degree=2) gives level + slope; fixing slope variance to 0
+  # makes the slope a constant drift term
+  model_spec <- SSModel(y ~ SSMtrend(degree = 2,
+                                     Q = list(matrix(NA), matrix(0))) +
+                            SSMcustom(Z = 1, T = 0, R = 1, Q = NA),
+                        H = known_sampling_var)
+  
+  # Initial guesses for variances (log-space)
+  # fitSSM optimizes the NA values in the order they appear in the model
+  initial_guesses <- log(c(var(diff(y)), var(y) / 10))
+  
+  fit <- fitSSM(model_spec, inits = initial_guesses, hessian = TRUE, ...)
+  out <- KFS(fit$model)
+  
+  # Drift is the smoothed slope at the end of the series
+  TT         <- length(y)
+  d.hat      <- out$alphahat[TT, "slope"]
+  d.var      <- out$V[2, 2, TT]
+  d.se       <- sqrt(d.var)
+  var_innov  <- fit$model$Q[1, 1, 1]
+  var_shock   <- fit$model$Q[3, 3, 1]
+  var_samp    <- fit$model$H[1, 1, 1]
+
+  # --- Variance CIs (from Hessian, log-scale) ---
+  z = qnorm(0.975)  # for 95% CI
+  hess     <- fit$optim.out$hessian
+  vcov_log <- solve(hess)
+  se_log       <- sqrt(diag(vcov_log))
+  theta        <- fit$optim.out$par
+  ci_var_innov <- exp(theta[1] + c(-z, z) * se_log[1])
+  ci_var_shock <- exp(theta[2] + c(-z, z) * se_log[2])
 
 
-
-
-
+   # --- Drift CI (from Kalman smoother) ---
+  ci_drift <- d.hat + c(-z, z) * d.se
+  
+  names(d.hat) <- names(var_innov) <- names(var_shock) <- names(var_samp) <- ""
+  
+    return(c(d            = d.hat,
+           var_innov    = var_innov,
+           var_samp     = var_samp,
+           var_shock    = var_shock,
+           d_lo         = ci_drift[1],
+           d_hi         = ci_drift[2],
+           var_innov_lo = ci_var_innov[1],
+           var_innov_hi = ci_var_innov[2],
+           var_shock_lo = ci_var_shock[1],
+           var_shock_hi = ci_var_shock[2]))
+}
 
 ###### RUN MODELS #####
 
@@ -225,6 +275,20 @@ state_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_error))
     # results in 10 states with 0 observation variance when using data excluding 2020
     # help page for StructTS says that it's not uncommon for 0's to occur
    
+# KFAS
+boot_results = read.csv(here("data", "boot_results_v2.csv"), header = TRUE, row.names = 1)
+state_kfas = list()
+state_kfas = as.data.frame(t(sapply(1:nrow(state_e0), function(i) {                                                                                                                                                                                                                                 
+    run_kfas(state_e0[i, ], known_sampling_var = boot_results[i, "e0.var"])
+  })))   
+
+rownames(state_kfas) <- rownames(state_e0)    
+View(state_kfas)
+write.csv(state_kfas, here("results", "kfas_results.csv"))
+
+
+
+
 
 # get names of states with var_obs = 0 
 state_no_obs_sts = which(state_sts[3,]==0)
@@ -238,6 +302,11 @@ state_no_obs_kem
 state_no_obs_bfgs = which(state_bfgs[3,]<=0.0000000001)
 state_no_obs_bfgs = colnames(state_bfgs)[state_no_obs_bfgs]
 state_no_obs_bfgs
+
+
+
+
+
 
 ## BAR PLOT OF 0 OBS_VAR BY METHOD ##
 
