@@ -1,0 +1,88 @@
+---
+title: "Shock Variance Analysis"
+format: html
+---
+
+```{r}
+#| label: setup
+#| message: false
+library(tidyverse)
+library(here)
+library(ggplot2)
+library(DT)
+```
+
+## Shock Variance Dot Chart
+
+```{r}
+#| label: load-data
+res <- readRDS(here("results", "model_fits.rds"))
+boot_results <- read.csv(here("data", "boot_results.csv"), header = TRUE, row.names = 1)
+```
+
+```{r}
+#| label: shock-variance-dot-chart
+# Extract observation variance from MARSS fits
+obs_var_new <- unlist(lapply(res$marss_sts_fits, function(x) coef(x)$R[1,1]))
+
+# Extract obs variance CIs from bfgs_with_cis
+obs_lb <- unlist(lapply(res$bfgs_with_cis, function(x) x[[26]][['R']]))
+obs_ub <- unlist(lapply(res$bfgs_with_cis, function(x) x[[25]][['R']]))
+
+# Bootstrap sampling variance CIs
+samp_lb <- boot_results$e0.var - 2 * boot_results$se_of_var_e0
+samp_ub <- boot_results$e0.var + 2 * boot_results$se_of_var_e0
+
+# Shock variance
+shock_mean <- obs_var_new - boot_results$e0.var
+
+# Shock CIs
+shock_lb <- shock_mean - 2 * boot_results$se_of_var_e0
+shock_ub <- shock_mean + 2 * boot_results$se_of_var_e0
+
+# Create dot chart
+data <- data.frame(
+  State = factor(names(shock_lb)),
+  Mean = shock_mean,
+  Lower = shock_lb,
+  Upper = shock_ub
+)
+data$State <- reorder(data$State, data$Mean)
+
+ggplot(data, aes(x = State, y = Mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  xlab("") +
+  ylab("Shock Variance") +
+  theme_minimal()
+```
+
+## BFGS Table with Bootstrap Sampling Variance (SD Scale)
+
+```{r}
+#| label: bfgs-table
+# Transpose state_bfgs and build table
+state_bfgs <- res$state_bfgs
+bfgs_df <- as.data.frame(t(state_bfgs))
+
+# Add sampling variance from bootstrap results
+bfgs_df$samp_var <- boot_results$e0.var
+
+# Compute shock variance (observation variance minus sampling variance)
+bfgs_df$shock_sd <- bfgs_df$var_obs - bfgs_df$samp_var
+
+# Convert all variance columns to SD scale
+bfgs_table <- data.frame(
+  State = rownames(bfgs_df),
+  Drift = bfgs_df$drift,
+  `Process SD` = sqrt(bfgs_df$var_proc),
+  `Observation SD` = sqrt(bfgs_df$var_obs),
+  `Sampling SD` = sqrt(bfgs_df$samp_var),
+  `Shock SD` = sqrt(bfgs_df$shock_sd),
+  check.names = FALSE
+)
+
+DT::datatable(bfgs_table, rownames = FALSE, options = list(pageLength = 25))
+```

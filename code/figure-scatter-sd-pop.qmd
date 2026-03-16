@@ -1,0 +1,124 @@
+---
+title: "SD Components vs Population Size"
+format: html
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(here)
+library(ggplot2)
+library(ggExtra)
+library(gridExtra)
+```
+
+```{r}
+#| label: load-data
+
+res <- readRDS(here("results", "model_fits.rds"))
+boot_results <- read.csv(here("data", "boot_results.csv"), header = TRUE, row.names = 1)
+pop_89 <- read.csv(here("data", "89_pop.csv"), header = TRUE, row.names = 1)
+pop_89 <- pop_89["Jul.89"]
+```
+
+```{r}
+#| label: build-table
+
+state_bfgs_table = as.data.frame(t(res$state_bfgs))
+samp_var = boot_results$e0.var
+state_bfgs_table = cbind(state_bfgs_table, samp_var)
+state_bfgs_table = state_bfgs_table %>%
+  mutate(shock_sd = var_obs - samp_var) %>%
+  mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), samp_var = sqrt(samp_var), shock_sd = sqrt(shock_sd))
+colnames(state_bfgs_table) = c("drift", "process_SD", "observation_SD", "sampling_SD", "shock_SD")
+```
+
+```{r}
+#| label: merge-population
+
+pop_89_for_figure = subset(pop_89, !(rownames(pop_89) %in% c("US", "DC")))
+pop_89_for_figure = pop_89_for_figure / 1e6
+state_table_for_figure = cbind(state_bfgs_table, pop_89_for_figure)
+state_table_for_figure = as.data.frame(state_table_for_figure)
+state_table_for_figure[] = lapply(state_table_for_figure, function(x) as.numeric(x))
+# remove states with 0 observation variance
+state_table_for_figure = subset(state_table_for_figure, state_table_for_figure$observation_SD >= 0.000000001)
+```
+
+```{r}
+#| label: fig-process-sd
+#| fig-cap: "Process SD vs Population Size"
+
+p1 <- ggplot(state_table_for_figure, aes(x = Jul.89, y = process_SD)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(a) Process Standard Deviation")
+ggExtra::ggMarginal(p1, type = "histogram", margins = "y")
+```
+
+```{r}
+#| label: fig-observation-sd
+#| fig-cap: "Observation SD vs Population Size"
+
+p2 <- ggplot(state_table_for_figure, aes(x = Jul.89, y = observation_SD)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(b) Obs. Standard Deviation")
+ggExtra::ggMarginal(p2, type = "histogram", margins = "y")
+```
+
+```{r}
+#| label: fig-sampling-sd
+#| fig-cap: "Sampling SD vs Population Size"
+
+p3 <- ggplot(state_table_for_figure, aes(x = Jul.89, y = sampling_SD)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(c) Sampling Standard Deviation")
+ggExtra::ggMarginal(p3, type = "histogram", margins = "y")
+```
+
+```{r}
+#| label: fig-shock-sd
+#| fig-cap: "Shock SD vs Population Size"
+
+p4 <- ggplot(state_table_for_figure, aes(x = Jul.89, y = shock_SD)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(d) Shock Standard Deviation")
+ggExtra::ggMarginal(p4, type = "histogram", margins = "y")
+```
+
+```{r}
+#| label: fig-combined
+#| fig-cap: "Process and Observation SD vs Population Size"
+#| fig-width: 12
+#| fig-height: 6
+
+p1_plain <- ggplot(state_table_for_figure, aes(x = Jul.89, y = process_SD)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(a) Process Standard Deviation")
+
+p2_plain <- ggplot(state_table_for_figure, aes(x = Jul.89, y = observation_SD)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  theme_minimal() +
+  ylim(0, 0.5) +
+  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(b) Obs. Standard Deviation")
+
+gridExtra::grid.arrange(p1_plain, p2_plain, ncol = 2)
+```

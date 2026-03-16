@@ -1,0 +1,68 @@
+---
+title: "Parameter Estimates (Variance Scale)"
+format: html
+---
+
+```{r}
+#| label: setup
+#| message: false
+library(here)
+library(DT)
+
+res <- readRDS(here("results", "model_fits.rds"))
+
+state_sts  <- res$state_sts
+state_bfgs <- res$state_bfgs
+state_kem  <- res$state_kem
+
+samp_sd_vec <- dget(here("data", "sampling_error.txt"))
+
+states_abbr <- c("AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+                 "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+                 "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+                 "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+                 "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY")
+full_names <- tolower(state.name[match(states_abbr, state.abb)])
+
+# Named vector: full lowercase name -> sampling SD
+samp_sd <- setNames(samp_sd_vec[states_abbr], full_names)
+```
+
+## StructTS
+
+```{r}
+#| label: structts-table
+state_sts_table <- as.data.frame(t(state_sts))
+state_sts_table$sampling_var <- samp_sd[rownames(state_sts_table)]^2
+state_sts_table$shock_var <- state_sts_table[, 3] - state_sts_table$sampling_var
+state_sts_table$shock_var[state_sts_table$shock_var < 0] <- NA
+colnames(state_sts_table) <- c("drift", "process_var", "observation_var",
+                                "sampling_var", "shock_var")
+DT::datatable(round(state_sts_table, 6))
+```
+
+## MARSS BFGS
+
+```{r}
+#| label: bfgs-table
+state_bfgs_table <- as.data.frame(t(state_bfgs))
+state_bfgs_table$sampling_var <- samp_sd[rownames(state_bfgs_table)]^2
+state_bfgs_table$shock_var <- state_bfgs_table[, 3] - state_bfgs_table$sampling_var
+state_bfgs_table$shock_var[state_bfgs_table$shock_var < 0] <- NA
+colnames(state_bfgs_table) <- c("drift", "process_var", "observation_var",
+                                 "sampling_var", "shock_var")
+DT::datatable(round(state_bfgs_table, 6))
+```
+
+## MARSS KEM
+
+```{r}
+#| label: kem-table
+state_kem_table <- as.data.frame(t(state_kem))
+state_kem_table$sampling_var <- samp_sd[rownames(state_kem_table)]^2
+state_kem_table$shock_var <- state_kem_table[, 3] - state_kem_table$sampling_var
+state_kem_table$shock_var[state_kem_table$shock_var < 0] <- NA
+colnames(state_kem_table) <- c("drift", "process_var", "observation_var",
+                                "sampling_var", "shock_var")
+DT::datatable(round(state_kem_table, 6))
+```

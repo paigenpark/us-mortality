@@ -1,0 +1,116 @@
+---
+title: "Fitted Values: RWD vs STS"
+format: html
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(here)
+library(MARSS)
+library(ggplot2)
+
+res <- readRDS(here("results", "model_fits.rds"))
+source(here("code", "model-functions.R"))
+```
+
+```{r}
+plot_fitted_from_saved <- function(y, rwd_fit, sts_fit, state_name) {
+  fit_rwd <- fitted(rwd_fit)
+  fit_sts <- fitted(sts_fit)
+
+  years <- as.numeric(colnames(res$state_e0))
+
+  df <- data.frame(
+    year = years,
+    observed = as.numeric(y),
+    rwd = fit_rwd[, 4],
+    sts = fit_sts[, 4]
+  )
+
+  ggplot(df, aes(x = year)) +
+    geom_line(aes(y = observed), color = "black") +
+    geom_line(aes(y = rwd), color = "red") +
+    geom_line(aes(y = sts), color = "blue") +
+    theme_minimal() +
+    labs(x = "Year", y = "Life Expectancy at Birth",
+         title = state_name,
+         subtitle = "Black = observed, Red = RWD, Blue = STS")
+}
+```
+
+## United States
+
+The national aggregate provides a baseline comparison. With a large population, sampling variance is negligible, so the RWD and STS fitted values tend to be very similar.
+
+```{r}
+plot_fitted_from_saved(
+  res$us_e0,
+  res$marss_rwd_us,
+  res$marss_sts_us,
+  "United States"
+)
+```
+
+## California
+
+California is an example where the STS model estimates observation variance at or near zero. When this happens, the STS model collapses to the RWD, and the two sets of fitted values overlap almost perfectly.
+
+```{r}
+plot_fitted_from_saved(
+  res$state_e0["california", ],
+  res$marss_rwd_fits[["california"]],
+  res$marss_sts_fits[["california"]],
+  "California"
+)
+```
+
+## Connecticut
+
+Connecticut is another case where observation variance is estimated near zero. Like California, this is a relatively large state where year-to-year fluctuations are attributed entirely to the latent process rather than measurement error.
+
+```{r}
+plot_fitted_from_saved(
+  res$state_e0["connecticut", ],
+  res$marss_rwd_fits[["connecticut"]],
+  res$marss_sts_fits[["connecticut"]],
+  "Connecticut"
+)
+```
+
+## North Carolina
+
+North Carolina illustrates a moderate observation variance case. Here the STS model smooths through the observed data more than the RWD, attributing some of the year-to-year variation to transitory measurement error rather than permanent shocks.
+
+```{r}
+plot_fitted_from_saved(
+  res$state_e0["north carolina", ],
+  res$marss_rwd_fits[["north carolina"]],
+  res$marss_sts_fits[["north carolina"]],
+  "North Carolina"
+)
+```
+
+## Alaska
+
+Alaska has the highest sampling variance among US states due to its small population. The STS model attributes a substantial share of observed variation to measurement error, producing noticeably smoother fitted values than the RWD. AIC tends to favor the STS specification here, reflecting the gain from separating signal and noise.
+
+```{r}
+plot_fitted_from_saved(
+  res$state_e0["alaska", ],
+  res$marss_rwd_fits[["alaska"]],
+  res$marss_sts_fits[["alaska"]],
+  "Alaska"
+)
+```
+
+## Massachusetts
+
+Massachusetts provides an additional comparison point. The degree of smoothing by the STS model relative to the RWD reflects how much observation variance the model estimates for this state.
+
+```{r}
+plot_fitted_from_saved(
+  res$state_e0["massachusetts", ],
+  res$marss_rwd_fits[["massachusetts"]],
+  res$marss_sts_fits[["massachusetts"]],
+  "Massachusetts"
+)
+```

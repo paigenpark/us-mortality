@@ -1,0 +1,106 @@
+---
+title: "Parameter Estimates (SD Scale)"
+format: html
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(here)
+library(DT)
+```
+
+```{r load-data}
+res <- readRDS(here("results", "model_fits.rds"))
+
+state_sts  <- res$state_sts
+state_bfgs <- res$state_bfgs
+state_kem  <- res$state_kem
+
+# Sampling SDs — named vector with state abbreviations
+samp_sd_vec <- dget(here("data", "sampling_error.txt"))
+```
+
+```{r mapping}
+# State abbreviation to full lowercase name mapping
+abbr_to_name <- c(
+  AL = "alabama", AK = "alaska", AZ = "arizona", AR = "arkansas",
+  CA = "california", CO = "colorado", CT = "connecticut", DE = "delaware",
+  FL = "florida", GA = "georgia", HI = "hawaii", ID = "idaho",
+  IL = "illinois", IN = "indiana", IA = "iowa", KS = "kansas",
+  KY = "kentucky", LA = "louisiana", ME = "maine", MD = "maryland",
+  MA = "massachusetts", MI = "michigan", MN = "minnesota", MS = "mississippi",
+  MO = "missouri", MT = "montana", NE = "nebraska", NV = "nevada",
+  NH = "new hampshire", NJ = "new jersey", NM = "new mexico", NY = "new york",
+  NC = "north carolina", ND = "north dakota", OH = "ohio", OK = "oklahoma",
+  OR = "oregon", PA = "pennsylvania", RI = "rhode island", SC = "south carolina",
+  SD = "south dakota", TN = "tennessee", TX = "texas", UT = "utah",
+  VT = "vermont", VA = "virginia", WA = "washington", WV = "west virginia",
+  WI = "wisconsin", WY = "wyoming"
+)
+
+# Build a lookup from full state name -> sampling SD
+# Only states present in samp_sd_vec get a value
+samp_sd_lookup <- setNames(samp_sd_vec, abbr_to_name[names(samp_sd_vec)])
+```
+
+```{r build-table-function}
+build_sd_table <- function(state_params, samp_sd_lookup) {
+  # state_params: rows = (d, var_innov, var_obs), cols = state names
+  tbl <- as.data.frame(t(state_params))
+  colnames(tbl) <- c("drift", "var_innov", "var_obs")
+
+  # Add sampling SD (NA for states not in the lookup, e.g. alaska, hawaii)
+  tbl$sampling_SD <- samp_sd_lookup[rownames(tbl)]
+
+  # Shock variance = observation variance - sampling variance
+  tbl$shock_var <- tbl$var_obs - tbl$sampling_SD^2
+
+  # Convert variances to SDs
+  tbl$process_SD     <- sqrt(tbl$var_innov)
+  tbl$observation_SD <- sqrt(tbl$var_obs)
+  tbl$shock_SD       <- sqrt(ifelse(tbl$shock_var >= 0, tbl$shock_var, NA))
+
+  # Select and order final columns
+  out <- tbl[, c("drift", "process_SD", "observation_SD", "sampling_SD", "shock_SD")]
+
+  out
+}
+```
+
+## StructTS
+
+```{r table-structts}
+tbl_sts <- build_sd_table(state_sts, samp_sd_lookup)
+
+DT::datatable(
+  round(tbl_sts, 8),
+  caption  = "StructTS parameter estimates (SD scale)",
+  options  = list(pageLength = 50, scrollX = TRUE),
+  rownames = TRUE
+)
+```
+
+## MARSS BFGS
+
+```{r table-bfgs}
+tbl_bfgs <- build_sd_table(state_bfgs, samp_sd_lookup)
+
+DT::datatable(
+  round(tbl_bfgs, 8),
+  caption  = "MARSS BFGS parameter estimates (SD scale)",
+  options  = list(pageLength = 50, scrollX = TRUE),
+  rownames = TRUE
+)
+```
+
+## MARSS KEM
+
+```{r table-kem}
+tbl_kem <- build_sd_table(state_kem, samp_sd_lookup)
+
+DT::datatable(
+  round(tbl_kem, 8),
+  caption  = "MARSS KEM parameter estimates (SD scale)",
+  options  = list(pageLength = 50, scrollX = TRUE),
+  rownames = TRUE
+)
+```

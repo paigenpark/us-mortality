@@ -1,924 +1,124 @@
-### SET-UP ###
-# some packages
-library(tidyverse) # version 
-library(here) # version
-library(ggExtra)
-library(gridExtra)
+### =========================================================================
+### 2-modeling.R
+###
+### Purpose: Fit structural time series (STS) models to US state-level life
+###          expectancy data (e0). The core model is a random walk with drift
+###          (RWD), optionally augmented with observation error. We compare
+###          four estimation backends:
+###            1. StructTS  -- R's built-in state-space optimizer (least flexible)
+###            2. MARSS/KEM -- EM algorithm via the MARSS package
+###            3. MARSS/BFGS -- quasi-Newton optimizer via the MARSS package
+###            4. KFAS      -- Kalman filter with known sampling variance
+###
+###          Model results are saved to results/ for downstream table/figure
+###          generation in separate .qmd files.
+### =========================================================================
+
+### ---- Packages & functions ----
+library(tidyverse)
+library(here)
 library(MARSS)
 library(KFAS)
 
+source(here("code", "model-functions.R"))
 
 
-### WRAPPER FUNCTIONS FOR STS MODELS ###
-
-### STRUCTTS ###
-# random walk with drift (RWD) specification
-rwd <- function(y){
-  sts = StructTS(x = y, type = "trend", fixed = c(NA, 0, 0))
-  d.hat = sts$model$a[2]
-  var_innov.hat = sts$coef["level"]
-  return(list(d = d.hat,
-              var_innov = var_innov.hat))
-}
-
-# structural time series (STS) specification = RWD + observation error
-rwd_with_obs_error <- function(y, ..., maxit = 5000){
-  sts = StructTS(x = y, type = "trend", fixed = c(NA, 0, NA), ...,
-                 optim.control = list(maxit = maxit))
-  d.hat = sts$model$a[2]
-  var_innov.hat = sts$coef["level"]
-  var_obs.hat = sts$coef["epsilon"]
-  names(d.hat) <- names(var_innov.hat) <- names(var_obs.hat) <- ""
-  
-  return(c(d = d.hat,
-           var_innov = var_innov.hat,
-           var_obs = var_obs.hat))
-}
-
-# function that estimates drift, variance, and AIC and BIC for RWD
-rwd_aic_bic <- function(y){
-  sts = StructTS(x = y, type = "trend", fixed = c(NA, 0, 0))
-  d.hat = sts$model$a[2]
-  var_innov.hat = sts$coef["level"]
-  
-  # get AIC and BIC (have to do this manually)
-  aic_val = -2*sts$loglik + 2
-  bic_val = -2*sts$loglik + log(length(y))
-  
-  return(c(d = d.hat,
-           var_innov = var_innov.hat,
-           aic = aic_val,
-           bic = bic_val))
-}
-
-# function that estimates drift, variances, AIC and BIC for STS 
-rwd_with_obs_aic_bic <- function(y, ..., maxit = 4000){
-  sts = StructTS(x = y, type = "trend", fixed = c(NA, 0, NA), ...,
-                 optim.control = list(maxit = maxit))
-  d.hat = sts$model$a[2]
-  var_innov.hat = sts$coef["level"]
-  var_obs.hat = sts$coef["epsilon"]
-  names(d.hat) <- names(var_innov.hat) <- names(var_obs.hat) <- ""
-  
-  # get AIC and BIC (have to do this manually)
-  aic_val = -2*sts$loglik + 2*2
-  bic_val = -2*sts$loglik + 2*log(length(y))
-  
-  return(c(d = d.hat,
-           var_innov = var_innov.hat,
-           var_obs = var_obs.hat,
-           aic = aic_val,
-           bic = bic_val))
-}
-
-# from my research, it seems that StructTS is the least flexible method for structural 
-# time series estimation. If there is some kind of issue with the optimization leading to 
-# the 0s, it is hard to adjust anything substantial in the StructTS specifications.
-# also, based on my software simulations, it produces more estimates of 0 than it should
-# therefore, we also set up function that use the MARSS() package
-
-
-
-
-### MARSS ###
-## BFGS ##
-rwd_with_obs_error_bfgs <- function(y, ...)
-{
- 
-  mod.list.2 <- list(B = matrix(1),
-                     U = matrix("d"),
-                     Q = matrix("q"),
-                     Z = matrix(1),
-                     A = matrix(0),
-                     R = matrix("r"),
-                     x0 = matrix("mu"),
-                     tinitx = 0)
-  out2.marss = MARSS(y, model = mod.list.2, control=list(maxit=1000), method= "BFGS", ...)
-  
-  if (out2.marss$convergence == 0) {
-    d = coef(out2.marss)$U[1,1]
-    var_innov = coef(out2.marss)$Q[1,1]
-    var_obs = coef(out2.marss)$R[1,1]
-  } else {
-    d = NA
-    var_innov = NA
-    var_obs = NA
-  }
-  
-  names(d) <- names(var_innov) <- names(var_obs) <- ""
-  return(c(d= d,
-           var_innov= var_innov,
-           var_obs = var_obs))
-}
-
-# for use with later AIC/AICc function - RWD specification
-rwd_bfgs <- function(y, ...)
-{
-  
-  mod.list.2 <- list(B = matrix(1),
-                     U = matrix("d"),
-                     Q = matrix("q"),
-                     Z = matrix(1),
-                     A = matrix(0),
-                     R = matrix(0), # set the observation var to 0 for rwd
-                     x0 = matrix("mu"),
-                     tinitx = 0)
-  out2.marss = MARSS(y, model = mod.list.2, control=list(maxit=3000), method= "BFGS", ...)
-  
-  return(out2.marss)
-}
-
-
-# for use with later AIC/AICc function - STS specification
-rwd_obs_error_bfgs_out <- function(y, ...)
-{
-  
-  mod.list.2 <- list(B = matrix(1),
-                     U = matrix("d"),
-                     Q = matrix("q"),
-                     Z = matrix(1),
-                     A = matrix(0),
-                     R = matrix("r"),
-                     x0 = matrix("mu"),
-                     tinitx = 0)
-  out2.marss = MARSS(y, model = mod.list.2, control=list(maxit=3000), method= "BFGS", ...)
-
-  return(out2.marss)
-}
-
-# AIC/AICc function
-get_aic_aicc = function(y, ...) {
-  rwd_result = rwd_bfgs(y)
-  obserr_result = rwd_obs_error_bfgs_out(y)
-  
-  return(c(rwd_result$AIC, obserr_result$AIC, rwd_result$AICc, obserr_result$AICc))
-}
-
-# this function needs work - I can get AIC and AICc from the MARSS output, but not the bootstrap AICs
-# that are supposedly better for time series. This function can help me do that but its not working 
-# properly right now
-get_aicbp_aicbb <- function(y, ...) {
-  rwd_result = rwd_bfgs(y)
-  obserr_result = rwd_obs_error_bfgs_out(y)
-  rwd_aic = MARSSaic(rwd_result, output = c("AICbp", "AICbb"))
-  obserr_aic = MARSSaic(obserr_result, output = c("AICbp", "AICbb"))
-  
-  return(c(rwd_aic, obserr_aic))
-}
-
-
-
-## KEM ##
-rwd_with_obs_error_kem <- function(y, ...)
-{
-  mod.list.2 <- list(B = matrix(1),
-                     U = matrix("d"),
-                     Q = matrix("q"),
-                     Z = matrix(1),
-                     A = matrix(0),
-                     R = matrix("r"),
-                     x0 = matrix("mu"),
-                     tinitx = 0)
-  out2.marss = MARSS(y, model = mod.list.2, control=list(maxit=1000), method= "kem", ...)
-  
-  if (out2.marss$convergence == 0) {
-    d = coef(out2.marss)$U[1,1]
-    var_innov = coef(out2.marss)$Q[1,1]
-    var_obs = coef(out2.marss)$R[1,1]
-  } else {
-    d = NA
-    var_innov = NA
-    var_obs = NA
-  }
-  
-  names(d) <- names(var_innov) <- names(var_obs) <- ""
-  return(c(d= d,
-           var_innov= var_innov,
-           var_obs = var_obs))
-}
-
-### KFAS ###
-run_kfas <- function(y, known_sampling_var, ...) {
-
-  y <- as.numeric(y)
-
-  # SSMtrend(degree=2) gives level + slope; fixing slope variance to 0
-  # makes the slope a constant drift term
-  model_spec <- SSModel(y ~ SSMtrend(degree = 2,
-                                     Q = list(matrix(NA), matrix(0))) +
-                            SSMcustom(Z = 1, T = 0, R = 1, Q = NA),
-                        H = known_sampling_var)
-  
-  # Initial guesses for variances (log-space)
-  # fitSSM optimizes the NA values in the order they appear in the model
-  initial_guesses <- log(c(var(diff(y)), var(y) / 10))
-  
-  fit <- fitSSM(model_spec, inits = initial_guesses, hessian = TRUE, ...)
-  out <- KFS(fit$model)
-  
-  # Drift is the smoothed slope at the end of the series
-  TT         <- length(y)
-  d.hat      <- out$alphahat[TT, "slope"]
-  d.var      <- out$V[2, 2, TT]
-  d.se       <- sqrt(d.var)
-  var_innov  <- fit$model$Q[1, 1, 1]
-  var_shock   <- fit$model$Q[3, 3, 1]
-  var_samp    <- fit$model$H[1, 1, 1]
-
-  # --- Variance CIs (from Hessian, log-scale) ---
-  z = qnorm(0.975)  # for 95% CI
-  hess     <- fit$optim.out$hessian
-  vcov_log <- solve(hess)
-  se_log       <- sqrt(diag(vcov_log))
-  theta        <- fit$optim.out$par
-  ci_var_innov <- exp(theta[1] + c(-z, z) * se_log[1])
-  ci_var_shock <- exp(theta[2] + c(-z, z) * se_log[2])
-
-
-   # --- Drift CI (from Kalman smoother) ---
-  ci_drift <- d.hat + c(-z, z) * d.se
-  
-  names(d.hat) <- names(var_innov) <- names(var_shock) <- names(var_samp) <- ""
-  
-    return(c(d            = d.hat,
-           var_innov    = var_innov,
-           var_samp     = var_samp,
-           var_shock    = var_shock,
-           d_lo         = ci_drift[1],
-           d_hi         = ci_drift[2],
-           var_innov_lo = ci_var_innov[1],
-           var_innov_hi = ci_var_innov[2],
-           var_shock_lo = ci_var_shock[1],
-           var_shock_hi = ci_var_shock[2]))
-}
-
-###### RUN MODELS #####
+### =========================================================================
+### Load data
+### =========================================================================
 
 state_e0 = read.csv(here("data", "combined_e0.csv"), header = TRUE, row.names = 1)
 
-# MARSS kem
-state_kem = matrix(NA, nrow=50, ncol=3)
+# US aggregate (first row of combined_e0)
+us_e0 = state_e0[1, ]
+state_e0 = state_e0[-1, ]  # remaining rows are states
+
+
+### =========================================================================
+### Fit models to all 50 states
+### =========================================================================
+
+# --- MARSS with EM (KEM) ---
+# 6 states fail to converge (8 if 2020 is excluded)
 state_kem = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_kem))
-  # results in 6 states that don't converge when used with "kem" method
-  # results in 8 states that don't converge when run on data excluding 2020
 
-# MARSS BFGS
-state_bfgs = matrix(NA, nrow=50, ncol=3)
+# --- MARSS with BFGS ---
+# 6 states have near-zero observation variance
 state_bfgs = as.data.frame(apply(state_e0, 1, rwd_with_obs_error_bfgs))
-  # results in 6 states with near 0 observation variance 
-  # results in 6 states with 0 observation variance when 2020 is excluded
 
-# StructTS
-state_sts = matrix(NA, nrow=50, ncol=3)
+# --- StructTS ---
+# 13 states have exactly zero obs variance (10 if 2020 is excluded)
 state_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_error))
-    # results in 13 states with 0 observation variance
-    # results in 10 states with 0 observation variance when using data excluding 2020
-    # help page for StructTS says that it's not uncommon for 0's to occur
-   
-# KFAS
-boot_results = read.csv(here("data", "boot_results_v2.csv"), header = TRUE, row.names = 1)
-state_kfas = list()
-state_kfas = as.data.frame(t(sapply(1:nrow(state_e0), function(i) {                                                                                                                                                                                                                                 
-    run_kfas(state_e0[i, ], known_sampling_var = boot_results[i, "e0.var"])
-  })))   
 
-rownames(state_kfas) <- rownames(state_e0)    
-View(state_kfas)
+# --- KFAS (with known sampling variance from bootstrap) ---
+boot_results = read.csv(here("data", "boot_results_v2.csv"), header = TRUE, row.names = 1)
+state_kfas = as.data.frame(t(sapply(1:nrow(state_e0), function(i) {
+    run_kfas(state_e0[i, ], known_sampling_var = boot_results[i, "e0.var"])
+  })))
+rownames(state_kfas) <- rownames(state_e0)
+
+# --- Full MARSS BFGS objects (for fitted values, AIC, CIs) ---
+set.seed(10)
+marss_sts_fits <- apply(state_e0, 1, rwd_obs_error_bfgs_out)
+marss_rwd_fits <- apply(state_e0, 1, rwd_bfgs)
+
+# US aggregate fits
+marss_sts_us <- rwd_obs_error_bfgs_out(us_e0)
+marss_rwd_us <- rwd_bfgs(us_e0)
+
+# --- AIC/AICc from MARSS BFGS ---
+aic_aicc <- data.frame(
+  rwd_aic  = sapply(marss_rwd_fits, function(x) x$AIC),
+  sts_aic  = sapply(marss_sts_fits, function(x) x$AIC),
+  rwd_aicc = sapply(marss_rwd_fits, function(x) x$AICc),
+  sts_aicc = sapply(marss_sts_fits, function(x) x$AICc)
+)
+rownames(aic_aicc) <- rownames(state_e0)
+
+# --- MARSS parameter CIs ---
+bfgs_with_cis <- lapply(marss_sts_fits, MARSSparamCIs)
+
+
+### =========================================================================
+### Identify states with zero / missing observation variance
+### =========================================================================
+
+# StructTS: exact zeros
+state_no_obs_sts = colnames(state_sts)[which(state_sts[3,] == 0)]
+cat("StructTS zero obs var:", state_no_obs_sts, "\n")
+
+# KEM: NAs indicate non-convergence
+state_no_obs_kem = colnames(state_kem)[which(is.na(state_kem[3,]))]
+cat("KEM non-converged:", state_no_obs_kem, "\n")
+
+# BFGS: near-zero (< 1e-10) treated as effectively zero
+state_no_obs_bfgs = colnames(state_bfgs)[which(state_bfgs[3,] <= 1e-10)]
+cat("BFGS near-zero obs var:", state_no_obs_bfgs, "\n")
+
+
+### =========================================================================
+### Save all results for downstream .qmd files
+### =========================================================================
+
+saveRDS(list(
+  state_e0       = state_e0,
+  us_e0          = us_e0,
+  state_kem      = state_kem,
+  state_bfgs     = state_bfgs,
+  state_sts      = state_sts,
+  state_kfas     = state_kfas,
+  aic_aicc       = aic_aicc,
+  marss_sts_fits = marss_sts_fits,
+  marss_rwd_fits = marss_rwd_fits,
+  marss_sts_us   = marss_sts_us,
+  marss_rwd_us   = marss_rwd_us,
+  bfgs_with_cis  = bfgs_with_cis,
+  boot_results   = boot_results,
+  state_no_obs_sts  = state_no_obs_sts,
+  state_no_obs_kem  = state_no_obs_kem,
+  state_no_obs_bfgs = state_no_obs_bfgs
+), here("results", "model_fits.rds"))
+
 write.csv(state_kfas, here("results", "kfas_results.csv"))
 
-
-
-
-
-# get names of states with var_obs = 0 
-state_no_obs_sts = which(state_sts[3,]==0)
-state_no_obs_sts = colnames(state_sts)[state_no_obs_sts]
-state_no_obs_sts
-
-state_no_obs_kem = which(is.na(state_kem[3,]))
-state_no_obs_kem = colnames(state_kem)[state_no_obs_kem]
-state_no_obs_kem
-
-state_no_obs_bfgs = which(state_bfgs[3,]<=0.0000000001)
-state_no_obs_bfgs = colnames(state_bfgs)[state_no_obs_bfgs]
-state_no_obs_bfgs
-
-
-
-
-
-
-## BAR PLOT OF 0 OBS_VAR BY METHOD ##
-
-barchart_data <- data.frame(
-  state = full_state_names,
-  MARSS_BFGS = full_state_names %in% state_no_obs_bfgs,
-  StructTS = full_state_names %in% state_no_obs_sts
-)
-
-# Reshape data to long format
-long_data <- pivot_longer(barchart_data, cols = c(MARSS_BFGS, StructTS), names_to = "method", values_to = "has_no_obs")
-
-# Filter to keep only TRUE values
-long_data <- long_data[long_data$has_no_obs == TRUE, ]
-
-# Create a stacked bar chart
-p_barchart <- ggplot(long_data, aes(x = method, fill = state)) +
-  geom_bar() +
-  labs(y = "Count of States with Estimate of Zero for Observation Variance", fill = "State", x=NULL) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Adjust the x-axis labels if necessary
-ggsave(here("results", "zero_obs_var_barchart.pdf"), p_barchart)
-
-##### GENERATING TABLES OF DRIFT, INNOV SD, OBS SD, SAMPLING SD, & SHOCK SD #####
-library(knitr)
-library(kableExtra)
-
-# get estimate for N to use in sampling SD approximation: I use the population estimates from the mid-point year of the time series (1989) 
-# if population growth is roughly linear during this time span that would be a reasonable thing to do
-
-# load in population data from the Census (data includes pop by state from 1985 to 1989)
-pop_89 = read.csv(paste(path, "89_pop.csv", sep = "/"), header = TRUE, row.names = 1)
-pop_89 = pop_89["Jul.89"] # filter to just year 1989
-
-pop_samp_sd = 150/sqrt(pop_89) # create sampling standard deviation estimates using N from 89 (approximation given in Hanley 2022)
-samp_sd = subset(samp_sd, !(rownames(samp_sd) %in% c("US", "DC"))) # get rid of observations not in USMDB 
-
-# construct StructTS table 
-state_sts_table = t(state_sts)
-state_sts_table = as.data.frame(cbind(state_sts_table, samp_sd))
-colnames(state_sts_table)[4] = "samp_sd"
-state_sts_table = state_sts_table %>%
-  mutate(shock_sd = var_obs - samp_sd^2) %>% # get shock sd through additive property of var
-  mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), shock_sd = sqrt(shock_sd)) # changing all of the variances to SDs
-  
-colnames(state_sts_table) = c("drift", "process_SD", "observation_SD", "sampling_SD", "shock_SD")
-state_sts_table$shock_SD <- ifelse(state_sts_table$shock_SD < 0, NA, state_sts_table$shock_SD)
-
-# round 
-library(scales)
-state_sts_table_round <- data.frame(lapply(state_sts_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.00000001) else x))
-
-# convert cells with 0 to red 
-state_sts_table_red = state_sts_table_round
-format_cell = function(cell_value) {
-  if (is.na(cell_value)) {
-    return(cell_spec("NA", "latex", background = "gray"))
-  } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value == "0.00000000", "#FF9999", "white"))
-  }
-}
-  
-state_sts_table_red[] = as.data.frame(sapply(state_sts_table_round, function(col) {
-  sapply(col, format_cell) 
-  }))
-
-rownames(state_sts_table_red) <- rownames(state_sts_table)
-
-# get latex code for StructTS
-kable(state_sts_table_red, caption = "StructTS Results", format="latex", escape = FALSE) %>%
-  kable_styling()
-
-
-# construct MARSS BFGS table
-state_bfgs_table = t(state_bfgs)
-state_bfgs_table = as.data.frame(cbind(state_bfgs_table, samp_sd))
-state_bfgs_table = state_bfgs_table %>%
-  mutate(shock_sd = var_obs - Jul.89^2) %>% # get shock sd through additive property of var
-  mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), shock_sd = sqrt(shock_sd)) # changing all of the variances to SDs
-
-colnames(state_bfgs_table) = c("drift", "process_SD", "observation_SD", "sampling_SD", "shock_SD")
-state_bfgs_table$shock_SD <- ifelse(state_bfgs_table$shock_SD < 0, NA, state_bfgs_table$shock_SD)
-
-# round 
-library(scales)
-state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.00000001) else x))
-
-# convert cells with 0 to red 
-state_bfgs_table_red = state_bfgs_table_round
-format_cell = function(cell_value) {
-  if (is.na(cell_value)) {
-    return(cell_spec("NA", "latex", background = "gray"))
-  } else {
-    # cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", "#FF9999", "white")) 
-    cell_spec(cell_value, "latex", background = "white")# changing this code to capture near 0 results in red 
-  }
-}
-
-state_bfgs_table_red[] = as.data.frame(sapply(state_bfgs_table_round, function(col) {
-  sapply(col, format_cell) 
-}))
-
-rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
-
-# get latex code for MARSS BFGS
-kable(state_bfgs_table_red, caption = "MARSS BFGS Results", format="latex", escape = FALSE) %>%
-  kable_styling()
-
-
-# construct MARSS kem table
-state_kem_table = t(state_kem)
-state_kem_table = as.data.frame(cbind(state_kem_table, samp_sd))
-state_kem_table = state_kem_table %>%
-  mutate(shock_sd = var_obs - Jul.89^2) %>% # get shock sd through additive property of var
-  mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), shock_sd = sqrt(shock_sd)) # changing all of the variances to SDs
-
-colnames(state_kem_table) = c("drift", "process_SD", "observation_SD", "sampling_SD", "shock_SD")
-state_kem_table$shock_SD <- ifelse(state_kem_table$shock_SD < 0, NA, state_kem_table$shock_SD)
-
-# round 
-library(scales)
-state_kem_table_round <- data.frame(lapply(state_kem_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.00000001) else x))
-
-# convert cells with 0 to red 
-state_kem_table_red = state_kem_table_round
-format_cell = function(cell_value) {
-  if (is.na(cell_value)) {
-    return(cell_spec("NA", "latex", background = "gray"))
-  } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value == "0.00000000", "#FF9999", "white"))
-  }
-}
-
-state_kem_table_red[] = as.data.frame(sapply(state_kem_table_round, function(col) {
-  sapply(col, format_cell) 
-}))
-
-rownames(state_kem_table_red) <- rownames(state_kem_table)
-
-# get latex code for MARSS kem
-kable(state_kem_table_red, caption = "MARSS KEM Results", format="latex", escape = FALSE) %>%
-  kable_styling()
-
-
-
-# VARIANCE TABLES 
-
-# construct StructTS table with variances 
-state_sts_table = t(state_sts)
-state_sts_table = as.data.frame(cbind(state_sts_table, samp_sd))
-state_sts_table = state_sts_table %>%
-  mutate(var_samp = Jul.89^2) %>%
-  mutate(var_shock = var_obs - var_samp)  # get shock variance through additive property of var
-state_sts_table = select(state_sts_table, -Jul.89)  
-
-colnames(state_sts_table) = c("drift", "process_var", "observation_var", "sampling_var", "shock_var")
-state_sts_table$shock_var <- ifelse(state_sts_table$shock_var < 0, NA, state_sts_table$shock_var)
-
-# round 
-library(scales)
-state_sts_table_round <- data.frame(lapply(state_sts_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.001) else x))
-
-# convert cells with 0 to red 
-state_sts_table_red = state_sts_table_round
-format_cell = function(cell_value) {
-  if (is.na(cell_value)) {
-    return(cell_spec("NA", "latex", background = "gray"))
-  } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value == "0.000", "#FF9999", "white"))
-  }
-}
-
-state_sts_table_red[] = as.data.frame(sapply(state_sts_table_round, function(col) {
-  sapply(col, format_cell) 
-}))
-
-rownames(state_sts_table_red) <- rownames(state_sts_table)
-
-# get latex code for StructTS
-kable(state_sts_table_red, caption = "StructTS Results", format="latex", escape = FALSE) %>%
-  kable_styling()
-
-
-# construct MARSS BFGS table with variances instead of SD
-state_bfgs_table = t(state_bfgs)
-state_bfgs_table = as.data.frame(cbind(state_bfgs_table, samp_sd))
-state_bfgs_table = state_bfgs_table %>%
-  mutate(var_samp = Jul.89^2) %>%
-  mutate(var_shock = var_obs - var_samp)  # get shock variance through additive property of var
-state_bfgs_table = select(state_bfgs_table, -Jul.89)  
-
-colnames(state_bfgs_table) = c("drift", "process_var", "observation_var", "sampling_var", "shock_var")
-state_bfgs_table$shock_var <- ifelse(state_bfgs_table$shock_var < 0, NA, state_bfgs_table$shock_var)
-
-# round 
-library(scales)
-state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.001) else x))
-
-# convert cells with 0 to red 
-state_bfgs_table_red = state_bfgs_table_round
-format_cell = function(cell_value) {
-  if (is.na(cell_value)) {
-    return(cell_spec("NA", "latex", background = "gray"))
-  } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", "#FF9999", "white")) # changing this code to capture near 0 results in red 
-  }
-}
-
-state_bfgs_table_red[] = as.data.frame(sapply(state_bfgs_table_round, function(col) {
-  sapply(col, format_cell) 
-}))
-
-rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
-
-# get latex code for MARSS BFGS
-kable(state_bfgs_table_red, caption = "MARSS BFGS Results", format="latex", escape = FALSE) %>%
-  kable_styling()
-
-
-# construct MARSS kem table with variances
-state_kem_table = t(state_kem)
-state_kem_table = as.data.frame(cbind(state_kem_table, samp_sd))
-state_kem_table = state_kem_table %>%
-  mutate(var_samp = Jul.89^2) %>%
-  mutate(var_shock = var_obs - var_samp)  # get shock variance through additive property of var
-state_kem_table = select(state_kem_table, -Jul.89)  
-
-colnames(state_kem_table) = c("drift", "process_var", "observation_var", "sampling_var", "shock_var")
-state_kem_table$shock_var <- ifelse(state_kem_table$shock_var < 0, NA, state_kem_table$shock_var)
-
-# round 
-library(scales)
-state_kem_table_round <- data.frame(lapply(state_kem_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.001) else x))
-
-# convert cells with 0 to red 
-state_kem_table_red = state_kem_table_round
-format_cell = function(cell_value) {
-  if (is.na(cell_value)) {
-    return(cell_spec("NA", "latex", background = "gray"))
-  } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value == "0.00000000", "#FF9999", "white"))
-  }
-}
-
-state_kem_table_red[] = as.data.frame(sapply(state_kem_table_round, function(col) {
-  sapply(col, format_cell) 
-}))
-
-rownames(state_kem_table_red) <- rownames(state_kem_table)
-
-# get latex code for MARSS kem
-kable(state_kem_table_red, caption = "MARSS KEM Results", format="latex", escape = FALSE) %>%
-  kable_styling()
-
-
-
-
-
-
-#### TABLES WITH BOOTSTRAP SAMPLING SD AND CONFIDENCE INTERVALS ####
-# load in sampling standard deviation estimates (and CIs) created using bootstrap approach
-# code for creating of these estimates can be found at in code file: 
-# bootstrap_variance_of_variance_of_e0.RMD
-boot_results = read.csv(paste(path, "boot_results.csv", sep = "/"), header = TRUE, row.names = 1)
-
-# the e0.var column in boot_results should replace the samp_var column in the prior table
-# the sd column in boot_results can be used to calculate confidence intervals for the samp_var column
-
-# to get sd/ci for first three columns of the table we're constructing, we need to get these from the 
-# MARSS output 
-set.seed(10)
-marss_out <- apply(state_e0, 1, rwd_obs_error_bfgs_out)
-bfgs_with_cis <- lapply(marss_out, MARSSparamCIs)
-obs_var_new <- unlist(lapply(marss_out, function(x) coef(x)$R[1,1]))
-
-# to get the sd/ci for the shock_sd column, we need to subtract cis from obs_var and samp_var (I think
-# this will work anyway)
-# to produce a conservative interval for shock variance, we need to subtract the lower bound obs var interval 
-# from the upper bound samp var interval and vice versa 
-# this gives the widest and most conservative interval of the shock variance 
-# R param = observation variance 
-obs_lb <- unlist(lapply(bfgs_with_cis, function(x) x[[26]][['R']]))
-obs_ub <- unlist(lapply(bfgs_with_cis, function(x) x[[25]][['R']]))
-
-samp_lb <- boot_results$e0.var - 2 * boot_results$se_of_var_e0
-samp_ub <- boot_results$e0.var + 2 * boot_results$se_of_var_e0
-
-# shock_lb <- obs_lb - samp_ub
-# shock_ub <- obs_ub - samp_lb
-shock_mean <- obs_var_new - boot_results$e0.var
-
-### trying suggestion from Josh 
-# assuming observation variance as a given (conditional on obs variance)
-# shock variance should have same se as samping variance 
-shock_lb <- shock_mean - 2 * boot_results$se_of_var_e0
-shock_ub <- shock_mean + 2 * boot_results$se_of_var_e0
-
-library(ggplot2)
-
-# prepare data
-data <- data.frame(
-  State = factor(names(shock_lb)),
-  Mean = shock_mean,
-  Lower = shock_lb,
-  Upper = shock_ub
-)
-
-data$State <- reorder(data$State, data$Mean)
-
-# Dot chart with confidence intervals
-p_dotchart <- ggplot(data, aes(x = State, y = Mean)) +
-  geom_point() +
-  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-  coord_flip() +
-  xlab("") +
-  ylab("Shock Variance") +
-  theme_minimal()
-ggsave(here("results", "shock_variance_dotchart.pdf"), p_dotchart)
-
-
-# construct MARSS BFGS table with bootstrap variance
-state_bfgs_table = t(state_bfgs)
-samp_var = boot_results$e0.var
-state_bfgs_table = as.data.frame(cbind(state_bfgs_table, samp_var))
-state_bfgs_table = state_bfgs_table %>%
-  mutate(shock_sd = var_obs - samp_var) %>% # get shock sd through additive property of var
-  mutate(var_innov = sqrt(var_innov), var_obs = sqrt(var_obs), samp_var = sqrt(samp_var), shock_sd = sqrt(shock_sd)) # changing all of the variances to SDs
-
-colnames(state_bfgs_table) = c("drift", "process SD", "observation SD", "sampling SD", "shock SD")
-# state_bfgs_table$shock_SD <- ifelse(state_bfgs_table$shock_SD < 0, NA, state_bfgs_table$shock_SD)
-
-# round 
-library(scales)
-library(kableExtra)
-state_bfgs_table_round <- data.frame(lapply(state_bfgs_table, function(x) if(is.numeric(x)) number(x, accuracy = 0.001) else x))
-
-# convert cells with 0 to red 
-state_bfgs_table_red = state_bfgs_table_round
-format_cell = function(cell_value) {
-  if (is.na(cell_value)) {
-    return(cell_spec("sim 0", "latex"))
-  } else {
-    cell_spec(cell_value, "latex", background = ifelse(cell_value <= "0.00010000", 
-                                                       "#FF9999", "white")) # changing this code to capture near 0 results in red 
-  }
-}
-
-state_bfgs_table_red[] = as.data.frame(sapply(state_bfgs_table_round, function(col) {
-  sapply(col, format_cell) 
-}))
-
-rownames(state_bfgs_table_red) <- rownames(state_bfgs_table)
-
-# get latex code for MARSS BFGS
-kable(state_bfgs_table_red, 
-      caption = "Structural Time Series Model Results for Life Expectancy at Birth", 
-      format="latex", escape = FALSE) %>%
-  kable_styling()
-
-### FIGURE VERSION OF TABLE ###
-pop_89_for_figure = subset(pop_89, !(rownames(pop_89) %in% c("US", "DC")))
-pop_89_for_figure = pop_89_for_figure / 1e6 # get population in millions
-state_table_for_figure = cbind(state_bfgs_table_round, pop_89_for_figure)
-state_table_for_figure = as.data.frame(state_table_for_figure)
-state_table_for_figure[] = lapply(state_table_for_figure, function(x) as.numeric(x))
-
-# remove states with 0 observation variance 
-state_table_for_figure = subset(state_table_for_figure, state_table_for_figure$observation.SD >= 0.000000001)
-
-# Create the scatterplot for process SD
-process <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(process.SD))) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE, col = "red") +
-  theme_minimal() +
-  ylim(0, 0.5) +
-  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
-       title = "(a) Process Standard Deviation")
-
-# Add the marginal histogram to the y-axis
-process <- ggExtra::ggMarginal(process, type = "histogram", margins = "y")
-
-# Save the plot
-ggsave(here("results", "scatter_process_sd.pdf"), process)
-
-
-# Create the scatterplot for observation variance
-obs <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(observation.SD))) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE, col = "red") +
-  theme_minimal() +
-  ylim(0, 0.5) +
-  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
-       title = "(b) Obs. Standard Deviation")
-
-# Add the marginal histogram to the y-axis
-obs <- ggExtra::ggMarginal(obs, type = "histogram", margins = "y")
-
-# Save the plot
-ggsave(here("results", "scatter_obs_sd.pdf"), obs)
-
-# Create the scatterplot for sampling SD
-sampling <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(sampling.SD))) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE, col = "red") +
-  theme_minimal() +
-  ylim(0, 0.5) +
-  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
-       title = "(c) Sampling Standard Deviation")
-
-# Add the marginal histogram to the y-axis
-sampling <- ggExtra::ggMarginal(sampling, type = "histogram", margins = "y")
-
-# Save the plot
-ggsave(here("results", "scatter_sampling_sd.pdf"), sampling)
-
-# Create the scatterplot for shock
-shock <- ggplot(state_table_for_figure, aes(x = Jul.89, y = as.numeric(shock.SD))) +
-  geom_point() +
-  geom_smooth(method = "lm", se = FALSE, col = "red") +
-  theme_minimal() +
-  ylim(0, 0.5) +
-  labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", 
-       title = "(d) Shock Standard Deviation")
-
-# Add the marginal histogram to the y-axis
-shock <- ggExtra::ggMarginal(shock, type = "histogram", margins = "y")
-
-# Save the plot
-ggsave(here("results", "scatter_shock_sd.pdf"), shock)
-
-combined_plot <- grid.arrange(process, obs, nrow=1)
-ggsave(here("results", "scatter_combined.pdf"), combined_plot)
-
-
-
-
-
-### COMPARING MODEL SELECTION CRITERIA BETWEEN RWD AND STS ###
-# STS with AIC and BIC 
-state_aic_bic_sts = matrix(NA, nrow=5, ncol=50)
-state_aic_bic_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_aic_bic))
-
-# RWD with AIC and BIC
-state_aic_bic_rwd = matrix(NA, nrow=4, ncol=50)
-state_aic_bic_rwd = as.data.frame(apply(state_e0, 1, rwd_aic_bic))
-
-# list of states with lower AIC for rwd model (is this a similar list to 0 obs var list?)
-aic_smaller_indices = which(state_aic_bic_rwd['aic', ] < state_aic_bic_sts['aic', ])
-aic_smaller_states = colnames(state_aic_bic_rwd)[aic_smaller_indices]
-
-# list of states with lower BIC for rwd model (similar to 0 obs var list?)
-bic_smaller_indices = which(state_aic_bic_rwd['bic', ] < state_aic_bic_sts['bic', ])
-bic_smaller_states = colnames(state_aic_bic_rwd)[bic_smaller_indices]
-
-# Print the lists
-aic_smaller_states
-bic_smaller_states
-
-# we can see that more than half of the states favor the simpler random walk with drift models 
-# over the STS trend models considering AIC and BIC 
-# does this suggest something disappointing about the goodness-of-fit of the STS models? 
-# or do we think AIC and BIC aren't the best criterion to use here? 
-
-### COMPARING MODEL SELECTION CRITERIA USING MARSS BFGS ###
-aic_aicc = as.data.frame(t((apply(state_e0, 1, get_aic_aicc))))
-colnames(aic_aicc) = c("rwd_aic", "sts_aic", "rwd_aicc", "sts_aicc")
-aic_aicc$rwd_aic <- round(aic_aicc$rwd_aic, 1)
-aic_aicc$sts_aic <- round(aic_aicc$sts_aic, 1)
-aic_aicc$rwd_aicc <- round(aic_aicc$rwd_aicc, 1)
-aic_aicc$sts_aicc <- round(aic_aicc$sts_aicc, 1)
-
-# prep barchart
-aic = aic_aicc[,1:2]
-aic = rownames_to_column(aic, "state")
-aic$diff = aic$sts_aic - aic$rwd_aic
-
-# pure AIC value plot 
-aic_long = pivot_longer(aic, cols=c("rwd_aic", "sts_aic"), names_to="model", values_to="AIC")
-
-p_aic_comparison <- ggplot(aic_long, aes(x = state, y = AIC, fill = model)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Adjust text angle and justification for readability
-  labs(title = "Comparison of AIC Values by State",
-       x = "State",
-       y = "AIC Value",
-       fill = "Model")
-ggsave(here("results", "aic_comparison.pdf"), p_aic_comparison)
-
-# difference plot
-p_aic_diff <- ggplot(aic, aes(x = state, y = diff, fill = diff > 0)) +
-  geom_bar(stat = "identity") +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
-  scale_fill_manual(values = c("TRUE" = "lightblue", "FALSE" = "darkblue"),
-                    name = "Model Better",
-                    labels = c("TRUE" = "RWD Better", "FALSE" = "STS Better")) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(x = "State",
-       y = "AIC Difference")
-ggsave(here("results", "aic_difference.pdf"), p_aic_diff)
-
-# prep table
-aic_smaller_for_rwd = which(aic_aicc[ ,'rwd_aic'] < aic_aicc[ ,'sts_aic'])
-aic_smaller_for_rwd = rownames(aic_aicc)[aic_smaller_for_rwd]
-
-aicc_smaller_for_rwd = which(aic_aicc[ ,'rwd_aicc'] < aic_aicc[ ,'sts_aicc'])
-aicc_smaller_for_rwd = rownames(aic_aicc)[aicc_smaller_for_rwd]
-
-# Print the lists
-aic_smaller_for_rwd
-aicc_smaller_for_rwd
-
-### CREATING TABLE 4: TABLES OF AIC AND AICc VALUES FOR EACH STATE AND EACH MODEL ### 
-
-aic_aicc$rwd_aic = cell_spec(aic_aicc$rwd_aic, "latex", 
-                             background = ifelse(rownames(aic_aicc) %in% aic_smaller_for_rwd, "#FF9999", "white"))
-
-aic_aicc$rwd_aicc <- cell_spec(aic_aicc$rwd_aicc, "latex", 
-                               background = ifelse(rownames(aic_aicc) %in% aicc_smaller_for_rwd, "#FF9999", "white"))
-
-kable(aic_aicc, "latex", escape = FALSE) %>%
-  kable_styling()
-
-
-
-
-### PLOTTING DATA AND PREDICTIONS FROM RWD AND STS ###
-
-# test with whole US data
-rwd_us = rwd_bfgs(us_e0)
-sts_us = rwd_obs_error_bfgs_out(us_e0)
-
-fit_rwd = fitted(rwd_us)
-fit_sts = fitted(sts_us)
-
-pdf(here("results", "fitted_us.pdf"))
-plot(us_e0)
-lines(fit_rwd[,4], col = "red")
-lines(fit_sts[,4], col = "blue")
-dev.off()
-
-
-# The rwd and sts predictions look identical here, which makes sense given that 
-# the sts model estimates an obs variance of 0
-rwd_ca = rwd_bfgs(state_e0["california",])
-sts_ca = rwd_obs_error_bfgs_out(state_e0["california",])
-
-fit_rwd = fitted(rwd_ca)
-fit_sts = fitted(sts_ca)
-
-pdf(here("results", "fitted_california.pdf"))
-plot(state_e0["california",])
-lines(fit_rwd[,4], col = "red")
-lines(fit_sts[,4], col = "blue")
-dev.off()
-
-# testing on a state with a smaller population but still 0 obs variance
-rwd_ct = rwd_bfgs(state_e0["connecticut",])
-sts_ct = rwd_obs_error_bfgs_out(state_e0["connecticut",])
-
-fit_rwd = fitted(rwd_ct)
-fit_sts = fitted(sts_ct)
-
-pdf(here("results", "fitted_connecticut.pdf"))
-plot(state_e0["connecticut",])
-lines(fit_rwd[,4], col = "red")
-lines(fit_sts[,4], col = "blue")
-dev.off()
-
-rwd_nc = rwd_bfgs(state_e0["north carolina",])
-sts_nc = rwd_obs_error_bfgs_out(state_e0["north carolina",])
-
-fit_rwd = fitted(rwd_nc)
-fit_sts = fitted(sts_nc)
-
-pdf(here("results", "fitted_north_carolina.pdf"))
-plot(state_e0["north carolina",])
-lines(fit_rwd[,4], col = "red")
-lines(fit_sts[,4], col = "blue")
-dev.off()
-
-
-# an example of states with a high observation variance value and a stronger STS
-# indicated by AIC values
-rwd_ak = rwd_bfgs(state_e0["alaska",])
-sts_ak = rwd_obs_error_bfgs_out(state_e0["alaska",])
-
-fit_rwd = fitted(rwd_ak)
-fit_sts = fitted(sts_ak)
-
-pdf(here("results", "fitted_alaska.pdf"))
-plot(state_e0["alaska",])
-lines(fit_rwd[,4], col = "red")
-lines(fit_sts[,4], col = "blue")
-dev.off()
-
-rwd_ak = rwd_bfgs(state_e0["massachusetts",])
-sts_ak = rwd_obs_error_bfgs_out(state_e0["massachusetts",])
-
-fit_rwd = fitted(rwd_ak)
-fit_sts = fitted(sts_ak)
-
-pdf(here("results", "fitted_massachusetts.pdf"))
-plot(state_e0["massachusetts",])
-lines(fit_rwd[,4], col = "red")
-lines(fit_sts[,4], col = "blue")
-dev.off()
-
-
-
-
-
-
-
-
+cat("Done. Results saved to results/model_fits.rds\n")
