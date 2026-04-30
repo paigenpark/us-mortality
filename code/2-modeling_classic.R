@@ -30,8 +30,8 @@ source(here("code", "model-functions.R"))
 state_e0 = read.csv(here("data", "combined_e0.csv"), header = TRUE, row.names = 1)
 
 # US aggregate (first row of combined_e0)
-us_e0 = state_e0[1, ]
-state_e0 = state_e0[-1, ]  # remaining rows are states
+# us_e0 = as.numeric(state_e0[1, ])
+# state_e0 = state_e0[-1, ]  # remaining rows are states
 
 
 ### =========================================================================
@@ -52,6 +52,11 @@ state_sts = as.data.frame(apply(state_e0, 1, rwd_with_obs_error))
 
 # --- KFAS (with known sampling variance from bootstrap) ---
 boot_results = read.csv(here("data", "boot_results_v2.csv"), header = TRUE, row.names = 1)
+samp_sd_vec <- boot_results$e0.var %>% sqrt()
+names(samp_sd_vec) <- rownames(boot_results)
+write.csv(samp_sd_vec, here("results", "sampling_sds.csv"))
+
+
 state_kfas = as.data.frame(t(sapply(1:nrow(state_e0), function(i) {
     run_kfas(state_e0[i, ], known_sampling_var = boot_results[i, "e0.var"])
   })))
@@ -63,8 +68,8 @@ marss_sts_fits <- apply(state_e0, 1, rwd_obs_error_bfgs_out)
 marss_rwd_fits <- apply(state_e0, 1, rwd_bfgs)
 
 # US aggregate fits
-marss_sts_us <- rwd_obs_error_bfgs_out(us_e0)
-marss_rwd_us <- rwd_bfgs(us_e0)
+# marss_sts_us <- rwd_obs_error_bfgs_out(us_e0)
+# marss_rwd_us <- rwd_bfgs(us_e0)
 
 # --- AIC/AICc from MARSS BFGS ---
 aic_aicc <- data.frame(
@@ -102,7 +107,7 @@ cat("BFGS near-zero obs var:", state_no_obs_bfgs, "\n")
 
 saveRDS(list(
   state_e0       = state_e0,
-  us_e0          = us_e0,
+  #us_e0          = us_e0,
   state_kem      = state_kem,
   state_bfgs     = state_bfgs,
   state_sts      = state_sts,
@@ -110,8 +115,8 @@ saveRDS(list(
   aic_aicc       = aic_aicc,
   marss_sts_fits = marss_sts_fits,
   marss_rwd_fits = marss_rwd_fits,
-  marss_sts_us   = marss_sts_us,
-  marss_rwd_us   = marss_rwd_us,
+  #marss_sts_us   = marss_sts_us,
+  #marss_rwd_us   = marss_rwd_us,
   bfgs_with_cis  = bfgs_with_cis,
   boot_results   = boot_results,
   state_no_obs_sts  = state_no_obs_sts,

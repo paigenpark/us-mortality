@@ -1,0 +1,238 @@
+---
+title: "Adjusted Model Parameter Estimates (SD Scale)"
+format: html
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(here)
+library(DT)
+library(MARSS)
+```
+
+```{r load-data}
+res <- readRDS(here("results", "adjusted_model_fits.rds"))
+
+ratio_unpooled_list <- res$ratio_unpooled_list
+pooled_fit          <- res$pooled_fit
+my_states           <- res$my_states
+sigma.vec           <- res$sigma.vec
+```
+
+```{r}
+ratio_unpooled_list
+```
+```{r build-table-function}
+build_sd_table_adjusted <- function(fit_list, sigma.vec, my_states) {
+  # Extract parameters from a list of single-state marss_fit_for_pooled fits
+  # Model has persistent (q_p = ratio^2 * q) and transitory (q_t = q) components
+  # plus known sampling variance R = sigma^2
+  #
+  # Columns match table-1-sds: drift, process_SD, observation_SD, sampling_SD, shock_SD
+  #   drift          = U (drift on persistent component)
+  #   process_SD     = sqrt(q_p)  (persistent innovation SD)
+  #   observation_SD = sqrt(q_t + sigma^2)  (total obs-level SD: transitory + sampling)
+  #   sampling_SD    = sigma (known)
+  #   shock_SD       = sqrt(q_t)  (transitory shock SD)
+
+  n <- length(fit_list)
+  out <- data.frame(
+    drift          = numeric(n),
+    process_SD     = numeric(n),
+    observation_SD = numeric(n),
+    sampling_SD    = numeric(n),
+    shock_SD       = numeric(n),
+    row.names      = my_states
+  )
+
+  for (i in 1:n) {
+    fit <- fit_list[[i]]
+    q_val <- coef(fit)$Q["q", ]
+    q_p <- 9 * q_val   # persistent variance (ratio=3, so 3^2=9)
+    q_t <- q_val        # transitory variance
+    d <- coef(fit)$U[1, 1]
+    samp_var <- as.numeric(sigma.vec[i])^2
+
+    out$drift[i]          <- d
+    out$process_SD[i]     <- sqrt(q_p)
+    out$observation_SD[i] <- sqrt(q_t + samp_var)
+    out$sampling_SD[i]    <- as.numeric(sigma.vec[i])
+    out$shock_SD[i]       <- sqrt(q_t)
+  }
+
+  out
+}
+
+build_sd_table_pooled <- function(pooled_fit, sigma.vec, my_states) {
+  # Extract parameters from a pooled marss_fit_for_pooled fit
+  # Q is shared across states; U varies by state
+
+  n <- length(my_states)
+  q_val <- pooled_fit$par$Q["q", ]
+  q_p <- 9 * q_val
+  q_t <- q_val
+
+  out <- data.frame(
+    drift          = numeric(n),
+    process_SD     = numeric(n),
+    observation_SD = numeric(n),
+    sampling_SD    = numeric(n),
+    shock_SD       = numeric(n),
+    row.names      = my_states
+  )
+
+  for (i in 1:n) {
+    d <- coef(pooled_fit)$U[i, 1]
+    samp_var <- as.numeric(sigma.vec[i])^2
+
+    out$drift[i]          <- d
+    out$process_SD[i]     <- sqrt(q_p)
+    out$observation_SD[i] <- sqrt(q_t + samp_var)
+    out$sampling_SD[i]    <- as.numeric(sigma.vec[i])
+    out$shock_SD[i]       <- sqrt(q_t)
+  }
+
+  out
+}
+```
+
+## Ratio-Unpooled (SD Ratio = 3)
+
+```{r table-ratio-unpooled}
+tbl_ratio <- build_sd_table_adjusted(ratio_unpooled_list, sigma.vec, my_states)
+
+DT::datatable(
+  round(tbl_ratio, 8),
+  caption  = "Ratio-unpooled parameter estimates (SD scale, ratio = 3)",
+  options  = list(pageLength = 50, scrollX = TRUE),
+  rownames = TRUE
+)
+```
+
+## Pooled (SD Ratio = 3)
+
+```{r table-pooled}
+tbl_pooled <- build_sd_table_pooled(pooled_fit, sigma.vec, my_states)
+
+DT::datatable(
+  round(tbl_pooled, 8),
+  caption  = "Pooled parameter estimates (SD scale, ratio = 3)",
+  options  = list(pageLength = 50, scrollX = TRUE),
+  rownames = TRUE
+)
+```
+
+## AIC Comparison
+
+```{r aic-comparison}
+aic_unpooled_by_state <- sapply(ratio_unpooled_list, function(f) f$AIC)
+aic_unpooled_total    <- sum(aic_unpooled_by_state)
+aic_pooled            <- pooled_fit$AIC
+
+data.frame(
+  model = c("ratio_unpooled (sum across states)", "pooled"),
+  AIC   = c(aic_unpooled_total, aic_pooled),
+  delta = c(aic_unpooled_total - aic_pooled, 0)
+)
+```
+
+## Pooled — LaTeX
+
+```{r latex-pooled, results='asis'}
+tbl_latex <- round(tbl_pooled, 3)
+
+# Move USA row to bottom, rename to US
+us_idx <- which(rownames(tbl_latex) == "USA")
+if (length(us_idx)) {
+  rownames(tbl_latex)[us_idx] <- "US"
+  tbl_latex <- rbind(tbl_latex[-us_idx, , drop = FALSE], tbl_latex[us_idx, , drop = FALSE])
+}
+
+# Map state abbreviations to full names (keep DC and US as-is)
+abb_to_name <- setNames(state.name, state.abb)
+abb_to_name["US"] <- "US"
+rn <- rownames(tbl_latex)
+mapped <- abb_to_name[rn]
+rownames(tbl_latex) <- ifelse(is.na(mapped), rn, mapped)
+
+# Replace 0 and NA with "ND"
+tbl_char <- as.data.frame(lapply(tbl_latex, function(col) {
+  s <- ifelse(is.na(col) | col == 0, "ND", format(col, nsmall = 3))
+  s
+}), stringsAsFactors = FALSE)
+rownames(tbl_char) <- rownames(tbl_latex)
+
+# Build LaTeX
+header <- paste0(
+  "\\begin{table}[ht]\n",
+  "\\centering\n",
+  "\\caption{Pooled parameter estimates (SD scale, ratio = 3)}\n",
+  "\\begin{tabular}{l", paste(rep("r", ncol(tbl_char)), collapse = ""), "}\n",
+  "\\hline\n",
+  "State & ", paste(c("Drift", "Process SD", "Observation SD", "Sampling SD", "Shock SD"), collapse = " & "), " \\\\\n",
+  "\\hline\n"
+)
+
+body <- paste(apply(cbind(rownames(tbl_char), tbl_char), 1, function(r) {
+  paste(r, collapse = " & ")
+}), collapse = " \\\\\n")
+
+footer <- paste0(
+  " \\\\\n\\hline\n",
+  "\\end{tabular}\n",
+  "\\end{table}"
+)
+
+cat("```latex\n")
+cat(header, body, footer, sep = "")
+cat("\n```\n")
+```
+
+```{r latex-ratio, results='asis'}
+tbl_latex <- round(tbl_ratio, 3)
+
+# Move USA row to bottom, rename to US
+us_idx <- which(rownames(tbl_latex) == "USA")
+if (length(us_idx)) {
+  rownames(tbl_latex)[us_idx] <- "US"
+  tbl_latex <- rbind(tbl_latex[-us_idx, , drop = FALSE], tbl_latex[us_idx, , drop = FALSE])
+}
+
+# Map state abbreviations to full names (keep DC and US as-is)
+abb_to_name <- setNames(state.name, state.abb)
+abb_to_name["US"] <- "US"
+rn <- rownames(tbl_latex)
+mapped <- abb_to_name[rn]
+rownames(tbl_latex) <- ifelse(is.na(mapped), rn, mapped)
+
+# Replace 0 and NA with "ND"
+tbl_char <- as.data.frame(lapply(tbl_latex, function(col) {
+  s <- ifelse(is.na(col) | col == 0, "ND", format(col, nsmall = 3))
+  s
+}), stringsAsFactors = FALSE)
+rownames(tbl_char) <- rownames(tbl_latex)
+
+# Build LaTeX
+header <- paste0(
+  "\\begin{table}[ht]\n",
+  "\\centering\n",
+  "\\caption{Ratio parameter estimates (SD scale, ratio = 3)}\n",
+  "\\begin{tabular}{l", paste(rep("r", ncol(tbl_char)), collapse = ""), "}\n",
+  "\\hline\n",
+  "State & ", paste(c("Drift", "Process SD", "Observation SD", "Sampling SD", "Shock SD"), collapse = " & "), " \\\\\n",
+  "\\hline\n"
+)
+
+body <- paste(apply(cbind(rownames(tbl_char), tbl_char), 1, function(r) {
+  paste(r, collapse = " & ")
+}), collapse = " \\\\\n")
+
+footer <- paste0(
+  " \\\\\n\\hline\n",
+  "\\end{tabular}\n",
+  "\\end{table}"
+)
+
+cat("```latex\n")
+cat(header, body, footer, sep = "")
+cat("\n```\n")
+```

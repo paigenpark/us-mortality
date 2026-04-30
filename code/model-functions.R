@@ -222,3 +222,68 @@ run_kfas <- function(y, known_sampling_var, ...) {
            var_shock_lo = ci_var_shock[1],
            var_shock_hi = ci_var_shock[2]))
 }
+
+marss_fit_for_pooled <-
+    function(Y, sigma, sd_ratio = NULL, max_iter = 500, inits = NULL)
+{
+    ## Y ~ data, 1 or many us states
+    ## sigma ~ vector of sampling_sds, 1 or more
+    ## sd_ratio of NULL means no constraint. I used 3 for pooled fitting.
+    ## not 100% sure of "inits"
+    
+    # 1. Robust Data Shaping
+    # Force to matrix; if it's a vector, make it 1 row (n=1)
+    if (is.null(dim(Y))) {
+        Y <- matrix(Y, nrow = 1)
+    } else {
+        Y <- as.matrix(Y)
+    }
+    n <- nrow(Y)
+
+    # 2. Setup Variance Parameters (Q)
+    # Use list-matrix to allow mixing numbers and character names
+    Q_mat <- matrix(list(0), 2 * n, 2 * n)
+    # Define names/values based on sd_ratio
+    if (is.null(sd_ratio)) {
+        ## free 
+        q_persist_val <- "q_p"
+        q_transit_val <- "q_t"
+    }
+    if (!is.null(sd_ratio)) {
+        ## ratio constrained
+        var_ratio = sd_ratio^2
+        q_persist_val <- paste0(var_ratio, "*q")
+        q_transit_val <- "q"
+    }
+    # Fill the diagonal of the Q list-matrix
+    for(i in 1:n) {
+        Q_mat[i, i] <- q_persist_val           # Top half: Persistent
+        Q_mat[i + n, i + n] <- q_transit_val   # Bottom half: Transient
+    }
+    
+    # 3. Setup Drift Parameters (U)
+    # Also a list-matrix to hold character names
+    U_mat <- matrix(list(0), 2 * n, 1)
+    for(i in 1:n) {
+        U_mat[i, 1] <- paste0("u", i)
+    }
+    ## and stays 0 for i > n?
+
+    # 4. Final Model List
+    # Z and B are fixed numbers, so they don't strictly need to be lists, 
+    # but R is numeric here, so it's safe.
+    model_list <- list(
+        Z = cbind(diag(n), diag(n)),       # [I | I]
+        B = diag(c(rep(1, n), rep(0, n))), #  persistent (1), transient (0)
+        Q = Q_mat,
+        U = U_mat,
+        R = diag(as.numeric(sigma)^2, n), # Fixed known sampling variance
+        A = "zero",
+        x0 = matrix(c(Y[,1], rep(0, n)), 2 * n, 1) # Initial states
+    )
+    
+    # 5. Fit
+    fit <- MARSS(Y, model = model_list, method = "BFGS", 
+                 inits = inits, control = list(maxit = max_iter))
+    return(fit)
+}

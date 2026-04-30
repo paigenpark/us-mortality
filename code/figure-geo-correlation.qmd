@@ -1,0 +1,111 @@
+---
+title: "Geographic correlation of transitory mortality shocks"
+format: html
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(here)
+library(tidyverse)
+library(maps)
+library(geosphere)
+library(segmented)
+```
+
+```{r load-fits}
+fits <- readRDS(here("results", "adjusted_model_fits.rds"))
+ratio_unpooled_list <- fits$ratio_unpooled_list
+
+# drop US aggregate, AK, HI
+drop_regions <- c("US", "USA", "United States", "AK", "HI", "Alaska", "Hawaii")
+keep <- setdiff(names(ratio_unpooled_list), drop_regions)
+ratio_unpooled_list <- ratio_unpooled_list[keep]
+```
+
+```{r extract-transient}
+# For each unpooled fit (n=1), the latent state has 2 components:
+#   row 1 = persistent (random walk w/ drift)
+#   row 2 = transient (B=0, mean-zero, variance q_t)
+# The transient state is the part of the year-to-year shock that is NOT
+# explained by the known sampling variance.
+transient_mat <- t(sapply(ratio_unpooled_list, function(f) f$states[2, ]))
+rownames(transient_mat) <- names(ratio_unpooled_list)
+
+# pairwise Pearson correlation across states
+corr_matrix <- cor(t(transient_mat))
+```
+
+```{r centroids-distances}
+# centroids of lower 48 from map_data (lowercase full names)
+us <- map_data("state")
+centroids <- us %>%
+  group_by(region) %>%
+  group_modify(~ as.data.frame(centroid(cbind(.x$long, .x$lat)))) %>%
+  ungroup()
+
+# map state abbreviations (rownames of corr_matrix) to lowercase full names
+abb_to_name <- setNames(tolower(state.name), state.abb)
+state_lookup <- tibble(
+  abb  = rownames(corr_matrix),
+  name = abb_to_name[rownames(corr_matrix)]
+) %>% filter(!is.na(name) & name %in% centroids$region)
+
+centroids <- centroids %>% filter(region %in% state_lookup$name)
+centroids <- centroids[match(state_lookup$name, centroids$region), ]
+
+# pairwise great-circle distances in miles
+dist_m <- distm(centroids[, c("lon", "lat")], fun = distVincentySphere)
+dist_miles <- dist_m / 1609.344
+rownames(dist_miles) <- colnames(dist_miles) <- state_lookup$abb
+
+# subset corr to matched states (in same order)
+corr_matrix <- corr_matrix[state_lookup$abb, state_lookup$abb]
+```
+
+```{r long-format}
+upper_to_long <- function(M, value_name) {
+  M[lower.tri(M, diag = TRUE)] <- NA
+  as.data.frame(M) %>%
+    rownames_to_column("state1") %>%
+    pivot_longer(-state1, names_to = "state2", values_to = value_name,
+                 values_drop_na = TRUE)
+}
+
+distance_long <- upper_to_long(dist_miles, "distance")
+corr_long     <- upper_to_long(corr_matrix, "shock_correlation")
+
+combined_long <- inner_join(distance_long, corr_long,
+                            by = c("state1", "state2"))
+```
+
+```{r plot}
+n_years <- ncol(transient_mat)
+null_band <- 2 / sqrt(n_years)
+
+# Segmented regression: estimate a breakpoint, initialized near 1500 miles
+lin_fit <- lm(shock_correlation ~ distance, data = combined_long)
+seg_fit <- segmented(lin_fit, seg.Z = ~distance, psi = 1500)
+breakpoint <- as.numeric(seg_fit$psi[, "Est."])
+
+pred_grid <- tibble(distance = seq(min(combined_long$distance),
+                                   max(combined_long$distance),
+                                   length.out = 400))
+pred_grid$shock_correlation <- predict(seg_fit, newdata = pred_grid)
+
+p <- ggplot(combined_long, aes(x = distance, y = shock_correlation)) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  geom_vline(xintercept = breakpoint, linetype = "dotted", color = "grey50") +
+  geom_line(data = pred_grid, color = "red", linewidth = 0.8) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "Distance between state centroids (miles)",
+    y = "Correlation in transitory mortality shocks",
+    title = "Geographic correlation of transitory shocks in lower 48 states"
+  )
+
+print(p)
+
+ggsave(here("results", "fig-geo-correlation.pdf"),
+       plot = p, width = 10, height = 10)
+```

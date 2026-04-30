@@ -13,10 +13,12 @@ res <- readRDS(here("results", "model_fits.rds"))
 
 state_sts  <- res$state_sts
 state_bfgs <- res$state_bfgs
+us_bfgs   <- res$marss_sts_us
 state_kem  <- res$state_kem
 
 # Sampling SDs — named vector with state abbreviations
-samp_sd_vec <- dget(here("data", "sampling_error.txt"))
+samp_sd_vec <- dget(here("results", "sampling_sds.csv"))
+print(samp_sd_vec)
 ```
 
 ```{r mapping}
@@ -34,7 +36,7 @@ abbr_to_name <- c(
   OR = "oregon", PA = "pennsylvania", RI = "rhode island", SC = "south carolina",
   SD = "south dakota", TN = "tennessee", TX = "texas", UT = "utah",
   VT = "vermont", VA = "virginia", WA = "washington", WV = "west virginia",
-  WI = "wisconsin", WY = "wyoming"
+  WI = "wisconsin", WY = "wyoming", USA = "us_e0"
 )
 
 # Build a lookup from full state name -> sampling SD
@@ -79,6 +81,19 @@ DT::datatable(
 )
 ```
 
+## MARSS KEM
+
+```{r table-kem}
+tbl_kem <- build_sd_table(state_kem, samp_sd_lookup)
+
+DT::datatable(
+  round(tbl_kem, 8),
+  caption  = "MARSS KEM parameter estimates (SD scale)",
+  options  = list(pageLength = 50, scrollX = TRUE),
+  rownames = TRUE
+)
+```
+
 ## MARSS BFGS
 
 ```{r table-bfgs}
@@ -92,15 +107,52 @@ DT::datatable(
 )
 ```
 
-## MARSS KEM
+## MARSS BFGS — LaTeX
 
-```{r table-kem}
-tbl_kem <- build_sd_table(state_kem, samp_sd_lookup)
+```{r latex-bfgs, results='asis'}
+tbl_latex <- round(tbl_bfgs, 3)
 
-DT::datatable(
-  round(tbl_kem, 8),
-  caption  = "MARSS KEM parameter estimates (SD scale)",
-  options  = list(pageLength = 50, scrollX = TRUE),
-  rownames = TRUE
+# Rename us_e0 -> US
+rownames(tbl_latex)[rownames(tbl_latex) == "us_e0"] <- "US"
+
+# Capitalise state names for display
+rownames(tbl_latex) <- tools::toTitleCase(rownames(tbl_latex))
+
+# Move US row to bottom
+us_idx <- which(rownames(tbl_latex) == "US")
+if (length(us_idx)) {
+  tbl_latex <- rbind(tbl_latex[-us_idx, , drop = FALSE], tbl_latex[us_idx, , drop = FALSE])
+}
+
+# Replace 0 and NA with "ND"
+tbl_char <- as.data.frame(lapply(tbl_latex, function(col) {
+  s <- ifelse(is.na(col) | col == 0, "ND", format(col, nsmall = 3))
+  s
+}), stringsAsFactors = FALSE)
+rownames(tbl_char) <- rownames(tbl_latex)
+
+# Build LaTeX
+header <- paste0(
+  "\\begin{table}[ht]\n",
+  "\\centering\n",
+  "\\caption{MARSS BFGS parameter estimates (SD scale)}\n",
+  "\\begin{tabular}{l", paste(rep("r", ncol(tbl_char)), collapse = ""), "}\n",
+  "\\hline\n",
+  "State & ", paste(c("Drift", "Process SD", "Observation SD", "Sampling SD", "Shock SD"), collapse = " & "), " \\\\\n",
+  "\\hline\n"
 )
+
+body <- paste(apply(cbind(rownames(tbl_char), tbl_char), 1, function(r) {
+  paste(r, collapse = " & ")
+}), collapse = " \\\\\n")
+
+footer <- paste0(
+  " \\\\\n\\hline\n",
+  "\\end{tabular}\n",
+  "\\end{table}"
+)
+
+cat("```latex\n")
+cat(header, body, footer, sep = "")
+cat("\n```\n")
 ```

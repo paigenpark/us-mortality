@@ -40,11 +40,10 @@ for (i in 1:length(states)){
 
 # create dataframe for all states life expectancy at birth
 s_e0 <- lapply(state_data, function(x) x$ex[x$Age == 0])
-full_state_names <- tolower(state.name[match(states, state.abb)]) # full state names to match map
-names(s_e0) = full_state_names
+names(s_e0) = states
 state_e0 <- do.call(rbind, s_e0)
 colnames(state_e0) <- c(seq(1959,2020,1))
 
 #### SAVE COMBINED STATE AND US DATASET - WHAT IS USED IN THE PAPER ####
-combined_e0 <- rbind(us_e0, state_e0)
+combined_e0 <- rbind(USA = us_e0, state_e0)
 write.csv(combined_e0, paste(path, "combined_e0.csv", sep = "/"))
