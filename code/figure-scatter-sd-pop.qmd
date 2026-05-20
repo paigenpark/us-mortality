@@ -127,28 +127,28 @@ ggExtra::ggMarginal(p4, type = "histogram", margins = "y")
 
 p2_plain <- ggplot(state_table_for_figure, aes(x = Jul.89, y = observation_SD)) +
   geom_point() +
-  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  geom_smooth(method = "loess", se = TRUE, col = "grey50", linetype = "dashed") +
   theme_minimal() +
-  ylim(0, 0.4) +
+  ylim(0, 0.3) +
   labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(a) Obs. Standard Deviation")
 
 p3_plain <- ggplot(state_table_for_figure, aes(x = Jul.89, y = sampling_SD)) +
   geom_point() +
-  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  geom_smooth(method = "loess", se = TRUE, col = "grey50", linetype = "dashed") +
   theme_minimal() +
-  ylim(0, 0.4) +
+  ylim(0, 0.3) +
   labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(b) Sampling Standard Deviation")
 
 p4_plain <- ggplot(state_table_for_figure, aes(x = Jul.89, y = shock_SD)) +
   geom_point() +
-  geom_smooth(method = "lm", se = FALSE, col = "red") +
+  geom_smooth(method = "loess", se = TRUE, col = "grey50", linetype = "dashed") +
   theme_minimal() +
-  ylim(0, 0.4) +
+  ylim(0, 0.3) +
   labs(x = "Population Size (In Millions)", y = "Standard Deviation in Years", title = "(c) Shock Standard Deviation")
 
-p2_marg <- ggExtra::ggMarginal(p2_plain, type = "histogram", margins = "y")
-p3_marg <- ggExtra::ggMarginal(p3_plain, type = "histogram", margins = "y")
-p4_marg <- ggExtra::ggMarginal(p4_plain, type = "histogram", margins = "y")
+p2_marg <- ggExtra::ggMarginal(p2_plain, type = "boxplot", margins = "y")
+p3_marg <- ggExtra::ggMarginal(p3_plain, type = "boxplot", margins = "y")
+p4_marg <- ggExtra::ggMarginal(p4_plain, type = "boxplot", margins = "y")
 
 combined <- gridExtra::arrangeGrob(
   p2_marg, p3_marg, p4_marg,
